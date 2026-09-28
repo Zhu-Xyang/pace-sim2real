@@ -87,12 +87,12 @@ cd path/to/pace-sim2real
 ### 1.5. Convert urdf into usd for training
 convert urdf into usd using Isaaclab built-in toolbox
 ```bash
-python scripts/tools/convert_urdf.py \
-  xxx.urdf \ # path to urdf
-  xxx/usd \ # folder path to usd
-  --fix-base # 固定机器人baselink 为了后续注入chirp信号
-  --merge-joints # 可选，建议不加，避免手指等fixed关节引入
+python scripts/tools/convert_urdf.py xxx.urdf xxx.usda --fix-base --merge-joints
 ```
+xxx.urdf # path to urdf
+xxx.usda # path to usd file
+--fix-base # 固定机器人baselink 为了后续注入chirp信号
+--merge-joints # 可选
 
 ### 2. Collect excitation data
 

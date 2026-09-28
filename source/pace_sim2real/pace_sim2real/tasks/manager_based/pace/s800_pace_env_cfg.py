@@ -198,8 +198,8 @@ class S800PaceSceneCfg(PaceSim2realSceneCfg):
     robot: ArticulationCfg = ArticulationCfg(
         prim_path="{ENV_REGEX_NS}/Robot",
         spawn=UsdFileCfg(
-            # usd_path="/home/samsung/Humanoid/pace-sim2real/assets_robot/s800/usd/serial_robot_s_42dof/serial_robot_s_42dof.usda",
-            usd_path="/home/samsung/Humanoid/pace-sim2real/assets_robot/s800/usd_merge_joints/serial_robot_s_42dof/serial_robot_s_42dof.usda",
+            usd_path="/home/samsung/Humanoid/pace-sim2real/assets_robot/engineai_S800/usd/serial_s800.usda",
+            # usd_path="/home/samsung/Humanoid/pace-sim2real/assets_robot/s800/usd_merge_joints/serial_robot_s_42dof/serial_robot_s_42dof.usda",
             # usd_path="/home/samsung/Humanoid/pace-sim2real/assets_robot/s800/usd_no_inertia/serial_robot_s_42dof/serial_robot_s_42dof.usda",
             rigid_props=sim_utils.RigidBodyPropertiesCfg(
                 disable_gravity=False,
@@ -230,8 +230,11 @@ class S800PaceEnvCfg(PaceSim2realEnvCfg):
         # post init of parent
         super().__post_init__()
 
-        # URDF 转换时已通过 --fix-base 固定基座，不需要 Isaac Lab 再创建固定关节
-        self.scene.robot.spawn.articulation_props.fix_root_link = False
+        # 必须为 True。URDF 导入时 --fix-base 造了一个 root_joint（固定关节，同时挂着
+        # ArticulationRootAPI），fix_root_link 的作用是「开关这个已存在的关节」而不是
+        # 「再创建一个」：False 会把 articulation root 一起关掉，PhysX 报
+        # "did not match any rigid bodies"。（基类已设 True，这里显式写出以免被误改。）
+        self.scene.robot.spawn.articulation_props.fix_root_link = True
 
         # robot sim and control settings
         self.sim.dt = 0.0025  # 400Hz simulation
