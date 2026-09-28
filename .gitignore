@@ -14,8 +14,11 @@
 **/*.usdc
 **/*.usdz
 
-# Python
+# macOS
 .DS_Store
+._*
+
+# Python
 **/*.egg-info/
 **/__pycache__/
 **/.pytest_cache/

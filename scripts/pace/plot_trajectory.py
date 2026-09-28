@@ -6,6 +6,7 @@ import torch
 import matplotlib.pyplot as plt
 import re
 from pathlib import Path
+import csv
 
 import argparse
 
@@ -13,9 +14,10 @@ import argparse
 parser = argparse.ArgumentParser(description="Pace agent for Isaac Lab environments.")
 parser.add_argument("--folder_name", type=str, default=None, help="Name of the folder to use.")
 parser.add_argument("--mean_name", type=str, default=None, help="Name of the parameters file to use.")
-parser.add_argument("--robot_name", type=str, default="anymal_d_sim", help="Name of the robot.")
+parser.add_argument("--robot_name", type=str, default="s800_sim", help="Name of the robot.")
 parser.add_argument("--plot_trajectory", action="store_true", help="Whether to plot the trajectory.")
 parser.add_argument("--plot_score", action="store_true", help="Whether to plot the score over iterations.")
+parser.add_argument("--plot_table", action="store_true", help="Whether to print and save a parameter comparison table.")
 
 args = parser.parse_args()
 folder_name = args.folder_name
@@ -23,6 +25,7 @@ mean_name = args.mean_name
 robot_name = args.robot_name
 plot_trajectory = args.plot_trajectory
 plot_score = args.plot_score
+plot_table = args.plot_table
 
 current_dir = Path(__file__).parent.resolve()
 project_root = current_dir.parent.parent
@@ -35,7 +38,6 @@ if not log_dir.exists():
 
 _pattern = re.compile(r"^mean_(\d+)\.pt$")
 
-
 def find_latest_params(root: Path):
     best = None  # tuple (int, Path)
     for p in root.rglob("mean_*.pt"):
@@ -46,7 +48,6 @@ def find_latest_params(root: Path):
         if best is None or num > best[0]:
             best = (num, p)
     return None if best is None else best[1], best[0]
-
 
 # if no folder_name given, pick the most recent run folder for the robot
 if not folder_name:
@@ -122,5 +123,148 @@ if plot_trajectory:
         plt.grid()
         plt.tight_layout()
         plt.show()
+
+# ----------------------------------------------------------------------------
+# Parameter comparison table: identified vs. ground-truth (preset) values
+# ----------------------------------------------------------------------------
+# Ground-truth values used in data_collection.py to generate the "real" data.
+# These must be kept in sync with scripts/pace/data_collection.py.
+GT_ARMATURE = {
+    "J00_HIP_PITCH_L": 0.2427264, "J01_HIP_ROLL_L": 0.14110848, "J02_HIP_YAW_L": 0.0448737,
+    "J03_KNEE_PITCH_L": 0.2427264, "J04_ANKLE_PITCH_L": 0.0354625, "J05_ANKLE_ROLL_L": 0.0354625,
+    "J06_HIP_PITCH_R": 0.2427264, "J07_HIP_ROLL_R": 0.14110848, "J08_HIP_YAW_R": 0.0448737,
+    "J09_KNEE_PITCH_R": 0.2427264, "J10_ANKLE_PITCH_R": 0.0354625, "J11_ANKLE_ROLL_R": 0.0354625,
+    "J12_TORSO_YAW": 0.0448737,
+    "J13_SHOULDER_PITCH_L": 0.0354625, "J14_SHOULDER_ROLL_L": 0.0354625, "J15_SHOULDER_YAW_L": 0.0354625,
+    "J16_ELBOW_PITCH_L": 0.0354625, "J17_ELBOW_YAW_L": 0.00671625, "J18_WRIST_PITCH_L": 0.005, "J19_WRIST_ROLL_L": 0.005,
+    "J27_SHOULDER_PITCH_R": 0.0354625, "J28_SHOULDER_ROLL_R": 0.0354625, "J29_SHOULDER_YAW_R": 0.0354625,
+    "J30_ELBOW_PITCH_R": 0.0354625, "J31_ELBOW_YAW_R": 0.00671625, "J32_WRIST_PITCH_R": 0.005, "J33_WRIST_ROLL_R": 0.005,
+}
+
+GT_VISCOUS = {
+    "J00_HIP_PITCH_L": 1.6, "J01_HIP_ROLL_L": 1.6, "J02_HIP_YAW_L": 1.0,
+    "J03_KNEE_PITCH_L": 1.6, "J04_ANKLE_PITCH_L": 0.5, "J05_ANKLE_ROLL_L": 0.5,
+    "J06_HIP_PITCH_R": 1.6, "J07_HIP_ROLL_R": 1.6, "J08_HIP_YAW_R": 1.0,
+    "J09_KNEE_PITCH_R": 1.6, "J10_ANKLE_PITCH_R": 0.5, "J11_ANKLE_ROLL_R": 0.5,
+    "J12_TORSO_YAW": 1.0,
+    "J13_SHOULDER_PITCH_L": 0.5, "J14_SHOULDER_ROLL_L": 0.5, "J15_SHOULDER_YAW_L": 0.5,
+    "J16_ELBOW_PITCH_L": 0.5, "J17_ELBOW_YAW_L": 0.1, "J18_WRIST_PITCH_L": 0.1, "J19_WRIST_ROLL_L": 0.1,
+    "J27_SHOULDER_PITCH_R": 0.5, "J28_SHOULDER_ROLL_R": 0.5, "J29_SHOULDER_YAW_R": 0.5,
+    "J30_ELBOW_PITCH_R": 0.5, "J31_ELBOW_YAW_R": 0.1, "J32_WRIST_PITCH_R": 0.1, "J33_WRIST_ROLL_R": 0.1,
+}
+
+    # damping = torch.tensor([
+    #     1.6, 1.6, 1.0, 1.6, 0.5, 0.5,  # 左腿: HIP_PITCH, HIP_ROLL, HIP_YAW, KNEE, ANKLE_P, ANKLE_R
+    #     1.6, 1.6, 1.0, 1.6, 0.5, 0.5,  # 右腿
+    #     1.0,                             # 腰: TORSO_YAW
+    #     0.5, 0.5, 0.5, 0.5, 0.1, 0.1, 0.1,  # 左臂: SHOULDER_P/R/Y, ELBOW_P, ELBOW_Y, WRIST_P/R
+    #     0.5, 0.5, 0.5, 0.5, 0.1, 0.1, 0.1,  # 右臂
+    # ], device=env.unwrapped.device).unsqueeze(0)
+
+# GT_VISCOUS = 1.6    # all joints
+GT_FRICTION = 0.2   # all joints
+GT_BIAS = 0.05      # all joints
+GT_DELAY = 5        # sim steps
+
+if plot_table:
+    num_joints = len(joint_order)
+
+    # Extract identified parameters from the mean vector
+    id_armature = mean[0:num_joints]
+    id_viscous = mean[num_joints:2 * num_joints]
+    id_friction = mean[2 * num_joints:3 * num_joints]
+    id_bias = mean[3 * num_joints:4 * num_joints]
+    id_delay = mean[-1].item()
+
+    # ANSI color codes for terminal output
+    GREEN = "\033[92m"
+    RED = "\033[91m"
+    RESET = "\033[0m"
+
+    def color_err(err_str: str, err_val: float) -> str:
+        """Wrap error string in green (<50%) or red (>=50%) ANSI color.
+        Pad to 8 chars first so ANSI codes don't break alignment."""
+        padded = f"{err_str:>8}"
+        if abs(err_val) < 50.0:
+            return f"{GREEN}{padded}{RESET}"
+        else:
+            return f"{RED}{padded}{RESET}"
+
+    # Build table rows
+    header = (
+        f"{'Joint':<28}"
+        f"{'Arm_GT':>10} {'Arm_ID':>10} {'Err%':>8}"
+        f"  {'Visc_GT':>9} {'Visc_ID':>9} {'Err%':>8}"
+        f"  {'Fric_GT':>9} {'Fric_ID':>9} {'Err%':>8}"
+        f"  {'Bias_GT':>9} {'Bias_ID':>9} {'Err%':>8}"
+    )
+    sep = "=" * len(header)
+
+    print("\n" + sep)
+    print(header)
+    print(sep)
+
+    csv_rows = []
+
+    for i, name in enumerate(joint_order):
+        # Ground truth
+        a_gt = GT_ARMATURE.get(name, 0.0)
+        v_gt = GT_VISCOUS.get(name, 0.0)
+        f_gt = GT_FRICTION
+        b_gt = GT_BIAS
+
+        # Identified
+        a_id = id_armature[i].item()
+        v_id = id_viscous[i].item()
+        f_id = id_friction[i].item()
+        b_id = id_bias[i].item()
+
+        # Percentage errors
+        a_err = (a_id - a_gt) / a_gt * 100 if a_gt != 0 else 0.0
+        v_err = (v_id - v_gt) / v_gt * 100 if v_gt != 0 else 0.0
+        f_err = (f_id - f_gt) / f_gt * 100 if f_gt != 0 else 0.0
+        b_err = (b_id - b_gt) / b_gt * 100 if b_gt != 0 else 0.0
+
+        # Color-coded error strings
+        a_err_str = color_err(f"{a_err:>+7.1f}%", a_err)
+        v_err_str = color_err(f"{v_err:>+7.1f}%", v_err)
+        f_err_str = color_err(f"{f_err:>+7.1f}%", f_err)
+        b_err_str = color_err(f"{b_err:>+7.1f}%", b_err)
+
+        print(
+            f"{name:<28}"
+            f"{a_gt:>10.4f} {a_id:>10.4f} {a_err_str}"
+            f"  {v_gt:>9.1f} {v_id:>9.4f} {v_err_str}"
+            f"  {f_gt:>9.1f} {f_id:>9.4f} {f_err_str}"
+            f"  {b_gt:>9.2f} {b_id:>9.4f} {b_err_str}"
+        )
+
+        csv_rows.append([name, a_gt, a_id, a_err, v_gt, v_id, v_err, f_gt, f_id, f_err, b_gt, b_id, b_err])
+
+    print(sep)
+
+    # Delay row
+    d_err = (id_delay - GT_DELAY) / GT_DELAY * 100 if GT_DELAY != 0 else 0.0
+    d_err_padded = f"{d_err:+.1f}%"
+    if abs(d_err) < 50.0:
+        d_err_str = f"{GREEN}{d_err_padded}{RESET}"
+    else:
+        d_err_str = f"{RED}{d_err_padded}{RESET}"
+    print(f"Delay: GT={GT_DELAY}, ID={id_delay:.4f}, Err={d_err_str}")
+
+    # Save CSV
+    csv_path = log_dir / "param_comparison.csv"
+    with open(csv_path, "w", newline="") as csvfile:
+        writer = csv.writer(csvfile)
+        writer.writerow([
+            "Joint",
+            "Armature_GT", "Armature_ID", "Armature_Err%",
+            "Viscous_GT", "Viscous_ID", "Viscous_Err%",
+            "Friction_GT", "Friction_ID", "Friction_Err%",
+            "Bias_GT", "Bias_ID", "Bias_Err%",
+        ])
+        writer.writerows(csv_rows)
+        writer.writerow(["Delay", GT_DELAY, id_delay, f"{d_err:.1f}"])
+    print(f"\nComparison table saved to: {csv_path}")
 
 print("Plotting complete.")

@@ -10,7 +10,6 @@ from torch.utils.tensorboard import SummaryWriter as TensorboardSummaryWriter
 from datetime import datetime
 import os
 
-
 class CMAESOptimizer:
     def __init__(self, bounds, population_size, log_dir, joint_order, max_iteration, data, device, epsilon=None, sigma=0.5, save_interval=10, save_optimization_process=False):
 
@@ -109,23 +108,28 @@ class CMAESOptimizer:
         self.sim_params = self._params_to_sim_params(self.params)
 
     def update_simulator(self, articulation, joint_ids, initial_position):
-        env_ids = torch.arange(len(self.sim_params[:, self.armature_idx]))
+        env_ids = torch.arange(len(self.sim_params[:, self.armature_idx]), device=self.device, dtype=torch.int32)
         articulation.write_joint_armature_to_sim(self.sim_params[:, self.armature_idx], joint_ids=joint_ids, env_ids=env_ids)
-        articulation.data.default_joint_armature[:, joint_ids] = self.sim_params[:, self.armature_idx]
+        articulation.data.joint_armature[:, joint_ids] = self.sim_params[:, self.armature_idx]
         articulation.write_joint_viscous_friction_coefficient_to_sim(self.sim_params[:, self.damping_idx], joint_ids=joint_ids, env_ids=env_ids)
-        articulation.data.default_joint_viscous_friction_coeff[:, joint_ids] = self.sim_params[:, self.damping_idx]
+        articulation.data.joint_viscous_friction_coeff[:, joint_ids] = self.sim_params[:, self.damping_idx]
         # If we set static friction lower than dynamic friction, the sim complains. So we need to do this weird order.
-        articulation.write_joint_dynamic_friction_coefficient_to_sim(0.0, joint_ids=joint_ids, env_ids=env_ids)
+        # articulation.write_joint_dynamic_friction_coefficient_to_sim(0.0, joint_ids=joint_ids, env_ids=env_ids)
+        articulation.write_joint_dynamic_friction_coefficient_to_sim(
+            torch.zeros((env_ids.shape[0], joint_ids.shape[0]), device=self.device, dtype=torch.float32),
+            joint_ids=joint_ids,
+            env_ids=env_ids
+        )
         articulation.write_joint_friction_coefficient_to_sim(self.sim_params[:, self.friction_idx], joint_ids=joint_ids, env_ids=env_ids)
-        articulation.data.default_joint_friction_coeff[:, joint_ids] = self.sim_params[:, self.friction_idx]
+        articulation.data.joint_friction_coeff[:, joint_ids] = self.sim_params[:, self.friction_idx]
         articulation.write_joint_dynamic_friction_coefficient_to_sim(self.sim_params[:, self.friction_idx], joint_ids=joint_ids, env_ids=env_ids)
-        articulation.data.default_joint_dynamic_friction_coeff[:, joint_ids] = self.sim_params[:, self.friction_idx]
+        articulation.data.joint_dynamic_friction_coeff[:, joint_ids] = self.sim_params[:, self.friction_idx]
         articulation.write_joint_position_to_sim(initial_position + self.sim_params[:, self.bias_idx], joint_ids=joint_ids)
         articulation.write_joint_velocity_to_sim(torch.zeros_like(initial_position), joint_ids=joint_ids)
         for drive_type in articulation.actuators.keys():
             drive_indices = articulation.actuators[drive_type].joint_indices
             if isinstance(drive_indices, slice):
-                all_idx = torch.arange(joint_ids.shape[0], device=joint_ids.device)
+                all_idx = torch.arange(joint_ids.shape[0], device=joint_ids.device, dtype=torch.int32)
                 drive_indices = all_idx[drive_indices]
             comparison_matrix = (joint_ids.unsqueeze(1) == drive_indices.unsqueeze(0))
             drive_joint_idx = torch.argmax(comparison_matrix.int(), dim=0)

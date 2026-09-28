@@ -13,7 +13,7 @@ from isaaclab.app import AppLauncher
 # add argparse arguments
 parser = argparse.ArgumentParser(description="Pace agent for Isaac Lab environments.")
 parser.add_argument("--num_envs", type=int, default=4096, help="Number of environments to simulate.")
-parser.add_argument("--task", type=str, default="Isaac-Pace-Anymal-D-v0", help="Name of the task.")
+parser.add_argument("--task", type=str, default="Isaac-Pace-S800-v0", help="Name of the task.")
 # append AppLauncher cli args
 AppLauncher.add_app_launcher_args(parser)
 # parse the arguments
@@ -35,7 +35,6 @@ import pace_sim2real.tasks  # noqa: F401
 from pace_sim2real.utils import project_root
 from pace_sim2real import CMAESOptimizer
 
-
 def main():
     """Zero actions agent with Isaac Lab environment."""
     # parse configuration
@@ -53,7 +52,7 @@ def main():
     bounds_params = env_cfg.sim2real.bounds_params.to(env.unwrapped.device)
     articulation = env.unwrapped.scene["robot"]
     joint_order = env_cfg.sim2real.joint_order
-    sim_joint_ids = torch.tensor([articulation.joint_names.index(name) for name in joint_order], device=env.unwrapped.device)
+    sim_joint_ids = torch.tensor([articulation.joint_names.index(name) for name in joint_order], device=env.unwrapped.device, dtype=torch.int32)
 
     data_file = project_root() / "data" / env_cfg.sim2real.data_dir
     log_dir = project_root() / "logs" / "pace" / env_cfg.sim2real.robot_name
@@ -111,7 +110,6 @@ def main():
     opt.close()
     # close the simulator
     env.close()
-
 
 if __name__ == "__main__":
     # run the main function

@@ -84,12 +84,26 @@ conda activate <isaaclab_env>
 cd path/to/pace-sim2real
 ```
 
+### 1.5. Convert urdf into usd for training
+convert urdf into usd using Isaaclab built-in toolbox
+```bash
+python scripts/tools/convert_urdf.py \
+  xxx.urdf \ # path to urdf
+  xxx/usd \ # folder path to usd
+  --fix-base # 固定机器人baselink 为了后续注入chirp信号
+  --merge-joints # 可选，建议不加，避免手指等fixed关节引入
+```
+
 ### 2. Collect excitation data
 
 (Alternatively, place your own real-world data in `data/`)
 
 ```bash
 python scripts/pace/data_collection.py
+```
+if u are using s800 robot
+```bash
+python scripts/pace/data_collection.py --task=Isaac-Pace-S800-v0
 ```
 
 This will collect simulation data and store results in:
@@ -104,10 +118,28 @@ data/anymal_d_sim/chirp_data.pt
 python scripts/pace/fit.py
 ```
 
+if u are using s800 robot
+```bash
+python scripts/pace/fit.py --headless --task=Isaac-Pace-S800-v0
+```
+
 This will estimate the actuator and joint parameters using CMA-ES and store results in:
 
 ```
 logs/pace/anymal_d_sim/
+```
+
+### 4. Visualize results
+```bash
+python scripts/pace/plot_trajectory.py --plot_table --plot_trajectory --robot_name=s800_sim
+```
+options
+```bash
+--plot_trajectory 
+--plot_table
+--robot_name=s800_sim
+--folder_name=26_09_17_11-02-54 \
+--mean_name=mean_499.pt
 ```
 
 ---
@@ -255,7 +287,6 @@ The paper has been accepted for publication in **The International Journal of Ro
 [![PACE Star History](https://raw.githubusercontent.com/leggedrobotics/pace-sim2real/star-history-data/star-history.svg)](
   https://pace.filipbjelonic.com/star-history/
 )
-
 
 ---
 

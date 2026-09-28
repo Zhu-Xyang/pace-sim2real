@@ -21,11 +21,9 @@ from isaaclab.utils.assets import ISAAC_NUCLEUS_DIR
 
 from . import mdp
 
-
 ##
 # Scene definition
 ##
-
 
 @configclass
 class PaceSim2realSceneCfg(InteractiveSceneCfg):
@@ -50,17 +48,14 @@ class PaceSim2realSceneCfg(InteractiveSceneCfg):
         ),
     )
 
-
 ##
 # MDP settings
 ##
-
 
 @configclass
 class ActionsCfg:
     """Action specifications for the MDP."""
     joint_pos = mdp.JointPositionActionCfg(asset_name="robot", joint_names=[".*"], scale=1.0, use_default_offset=False)  # actions = absolute joint position targets
-
 
 @configclass
 class ObservationsCfg:
@@ -80,28 +75,24 @@ class ObservationsCfg:
     # observation groups
     policy: PolicyCfg = PolicyCfg()
 
-
 @configclass
 class RewardsCfg:
     """Reward terms for the MDP."""
     dof_pos_limits = RewTerm(func=mdp.joint_pos_limits, weight=0.0)
-
 
 @configclass
 class TerminationsCfg:
     """Termination terms for the MDP."""
     time_out = DoneTerm(func=mdp.time_out, time_out=False)
 
-
 @configclass
 class CMAESOptimizerCfg:
     """CMA-ES optimizer configuration."""
-    max_iteration: int = 200
+    max_iteration: int = 15000 # 从四足12dof到s800 27dof 增加迭代次数
     epsilon: float = 1e-2
     sigma: float = 0.5
-    save_interval: int = 10
+    save_interval: int = 25
     save_optimization_process: bool = False  # consume more disk space if True, saves optimization process after finishing
-
 
 @configclass
 class PaceCfg:
@@ -116,7 +107,6 @@ class PaceCfg:
 ##
 # Environment configuration
 ##
-
 
 @configclass
 class PaceSim2realEnvCfg(ManagerBasedRLEnvCfg):

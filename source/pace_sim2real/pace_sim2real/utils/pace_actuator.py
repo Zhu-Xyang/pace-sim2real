@@ -15,7 +15,6 @@ if TYPE_CHECKING:
     # only for type checking
     from .pace_actuator_cfg import PaceDCMotorCfg
 
-
 class PaceDCMotor(DCMotor):
     """Pace DC Motor actuator model with encoder bias and action delay.
 
@@ -54,7 +53,7 @@ class PaceDCMotor(DCMotor):
 
     def update_time_lags(self, delay: int | torch.Tensor, env_ids: Sequence[int] | None = None):
         if env_ids is None:
-            env_ids = torch.arange(self._num_envs, device=self._device)
+            env_ids = torch.arange(self._num_envs, device=self._device, dtype=torch.int32)
         self.torques_delay_buffer.set_time_lag(delay, env_ids)
 
     def compute(
