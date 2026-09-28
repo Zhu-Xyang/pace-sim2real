@@ -16,7 +16,8 @@ parser.add_argument("--num_envs", type=int, default=1, help="Number of environme
 # parser.add_argument("--task", type=str, default="Isaac-Pace-Anymal-D-v0", help="Name of the task.")
 parser.add_argument("--task", type=str, default="Isaac-Pace-S800-v0", help="Name of the task.")
 parser.add_argument("--min_frequency", type=float, default=0.1, help="Minimum frequency for the chirp signal in Hz.")
-parser.add_argument("--max_frequency", type=float, default=8.0, help="Maximum frequency for the chirp signal in Hz.")
+parser.add_argument("--max_frequency", type=float, default=2.0, help="Maximum frequency for the chirp signal in Hz. Ignored per-joint when --grouped-sweep is on (the default); used as the uniform fallback otherwise.")
+parser.add_argument("--grouped_sweep", action=argparse.BooleanOptionalAction, default=False, help="EXPERIMENTAL, off by default. Gives each joint its own sweep ceiling (3 Hz slow / 6 Hz fast) plus a per-joint phase offset. Measured to be WORSE than the uniform sweep: fast joints mistrack and the out-of-phase legs collide with each other. Enable with --grouped-sweep only if you also make L/R symmetric joints share a phase.")
 parser.add_argument("--duration", type=float, default=20.0, help="Duration of the chirp signal in seconds.")
 # append AppLauncher cli args
 AppLauncher.add_app_launcher_args(parser)
@@ -62,13 +63,21 @@ def main():
     print("Config joint_order:", joint_order)
     print("Mapped joint_ids:", joint_ids)
 
-    # 修改为（S800 27 关节，使用 XML 真实值）：
+    # ── ROUND-TRIP GROUND TRUTH ────────────────────────────────────────────
+    # 这一组值是「注入仿真的已知真值」，用来验证 fit 能否把它恢复出来。
+    # 不追求物理正确，但要求：
+    #   1) 分组内 uniform、组间拉开 → 既能被辨识，又能暴露关节间串扰/错配
+    #      （若 27 个关节全设同一个值，串扰发生了也看不出来）
+    #   2) 量级随关节尺寸缩放 → 否则小关节会被灌进远大于自身的虚构惯量
+    #   3) 必须落在 s800_pace_env_cfg.py 的 armature_bounds / damping_bounds 内
+    #
+    # 4 组: 0.24(大关节) / 0.14(髋侧摆) / 0.05(中小关节) / 0.008(末端)
     armature = torch.tensor([
-        0.2427264, 0.14110848, 0.0448737, 0.2427264, 0.0354625, 0.0354625,  # 左腿
-        0.2427264, 0.14110848, 0.0448737, 0.2427264, 0.0354625, 0.0354625,  # 右腿
-        0.0448737,                                                             # 腰
-        0.0354625, 0.0354625, 0.0354625, 0.0354625, 0.00671625, 0.005, 0.005, # 左臂
-        0.0354625, 0.0354625, 0.0354625, 0.0354625, 0.00671625, 0.005, 0.005, # 右臂
+        0.24, 0.14, 0.05, 0.24, 0.05, 0.05,  # 左腿: HIP_PITCH, HIP_ROLL, HIP_YAW, KNEE, ANKLE_P, ANKLE_R
+        0.24, 0.14, 0.05, 0.24, 0.05, 0.05,  # 右腿
+        0.05,                                 # 腰: TORSO_YAW
+        0.05, 0.05, 0.05, 0.05, 0.008, 0.008, 0.008,  # 左臂: SHOULDER_P/R/Y, ELBOW_P, ELBOW_Y, WRIST_P/R
+        0.05, 0.05, 0.05, 0.05, 0.008, 0.008, 0.008,  # 右臂
     ], device=env.unwrapped.device).unsqueeze(0)
 
     # viscous friction (d in PACE Eq.6) — per motor type, must match s800_pace_env_cfg.py
@@ -82,7 +91,20 @@ def main():
         0.5, 0.5, 0.5, 0.5, 0.1, 0.1, 0.1,  # 右臂
     ], device=env.unwrapped.device).unsqueeze(0)
 
-    friction = torch.tensor([1.5] * len(joint_ids), device=env.unwrapped.device).unsqueeze(0)  # coulomb friction
+    # coulomb friction — 必须按关节缩放，不能用全场统一值。
+    # 教训：曾用 [1.5]*27，结果手腕(最大PD力矩 12.5*0.05=0.625Nm)和肘偏航
+    # (10.04*0.15=1.506Nm) 被 1.5Nm 的静摩擦完全锁死，前 3 秒位置几乎不变(变化量 1e-5 rad)。
+    # 摩擦须明显小于该关节能产生的最大 PD 力矩，否则关节根本不动、参数不可辨识。
+    #   大关节(HIP_PITCH/ROLL/KNEE) PD力矩 ~150-320Nm → 1.0
+    #   中小关节                       PD力矩  4-70Nm   → 0.3
+    #   末端(ELBOW_YAW/WRIST)          PD力矩 0.6-1.5Nm → 0.05
+    friction = torch.tensor([
+        1.0, 1.0, 0.3, 1.0, 0.3, 0.3,  # 左腿: HIP_PITCH, HIP_ROLL, HIP_YAW, KNEE, ANKLE_P, ANKLE_R
+        1.0, 1.0, 0.3, 1.0, 0.3, 0.3,  # 右腿
+        0.3,                                 # 腰: TORSO_YAW
+        0.3, 0.3, 0.3, 0.3, 0.05, 0.05, 0.05,  # 左臂
+        0.3, 0.3, 0.3, 0.3, 0.05, 0.05, 0.05,  # 右臂
+    ], device=env.unwrapped.device).unsqueeze(0)
 
     bias = torch.tensor([0.05] * 27, device=env.unwrapped.device).unsqueeze(0)
 
@@ -123,12 +145,55 @@ def main():
     f0 = args_cli.min_frequency  # Hz
     f1 = args_cli.max_frequency  # Hz
 
-    # Linear chirp: phase = 2*pi*(f0*t + (f1-f0)/(2*duration)*t^2)
-    phase = 2 * pi * (f0 * t + ((f1 - f0) / (2 * duration)) * t ** 2)
-    chirp_signal = torch.sin(phase)
+    # ── 分组扫频 ───────────────────────────────────────────────────────────
+    # 每个关节用自己的扫频上限。依据：各关节闭环带宽 ω_n = sqrt(kp/I_total) 差异很大，
+    # 慢关节扫到高频只会"冻住"（实测 8Hz 段 HIP_PITCH 跟随度仅 5%），既浪费采集时间
+    # 又在辨识里贡献无效样本；快关节则需要更高频率才能激励出 armature。
+    #
+    # 取值 ≈ 1.5 × ω_n（当前 I_total 校正增益下的实测值）:
+    #   慢组 ω_n ≈ 2.0-2.4 Hz (HIP_PITCH/ROLL, KNEE, ANKLE_PITCH, TORSO,
+    #                            SHOULDER_P/R, ELBOW_PITCH, WRIST_PITCH) → f1 = 3.0 Hz
+    #   快组 ω_n ≈ 4.6-5.0 Hz (HIP_YAW, ANKLE_ROLL, SHOULDER_YAW,
+    #                            ELBOW_YAW, WRIST_ROLL)                 → f1 = 6.0 Hz
+    #
+    # 附带好处：各关节相位不再相同（phase 含 (f1_j - f0) 项），激励自动去相关，
+    # 回归矩阵条件数比全场同相位好很多。
+    # 顺序 = joint_order（"J00_HIP_PITCH_L" ... "J33_WRIST_ROLL_R"）
+    f1_per_joint = torch.tensor([
+        3.0, 3.0, 6.0, 3.0, 3.0, 6.0,      # 左腿: HIP_P, HIP_R, HIP_Y, KNEE, ANK_P, ANK_R
+        3.0, 3.0, 6.0, 3.0, 3.0, 6.0,      # 右腿
+        3.0,                                # 腰
+        3.0, 3.0, 6.0, 3.0, 6.0, 3.0, 6.0, # 左臂: SH_P, SH_R, SH_Y, ELB_P, ELB_Y, WR_P, WR_R
+        3.0, 3.0, 6.0, 3.0, 6.0, 3.0, 6.0, # 右臂
+    ], device=env.unwrapped.device)
 
+    if not args_cli.grouped_sweep:
+        f1_per_joint[:] = f1   # 关闭分组时退回全场统一 f1
+
+    # 逐关节独立相位 —— 仅用于诊断激励共线，默认关闭。
+    # ⚠️ 实测代价：左右腿失去同步，HIP_ROLL 左右反向摆动导致**双腿互撞**；且跟踪变差。
+    # 注意 cond(X^T X) 只是「指令矩阵」的条件数，是可辨识性的代理指标而非判据 ——
+    # fit.py 匹配的是仿真轨迹，参数→轨迹经过非线性刚体动力学，各关节惯量/耦合都不同，
+    # 指令共线并不等于参数不可辨识（上游 ANYmal 12 个关节指令全同，照样能辨识）。
+    # 若要用，必须把左右对称关节设成同相位，否则会撞腿。
+    if args_cli.grouped_sweep:
+        phase_offset = 2 * pi * torch.arange(len(joint_ids), device=env.unwrapped.device) / len(joint_ids)
+    else:
+        phase_offset = torch.zeros(len(joint_ids), device=env.unwrapped.device)
+
+    # 线性 chirp: phase_k(t) = 2*pi*(f0*t + (f1_k-f0)/(2*duration)*t^2) + phi_k
+    # t[:, None] -> (num_steps,1)，f1_per_joint[None,:] -> (1,27)，广播成 (num_steps,27)
+    phase = (
+        2 * pi * (f0 * t[:, None] + ((f1_per_joint[None, :] - f0) / (2 * duration)) * t[:, None] ** 2)
+        + phase_offset[None, :]
+    )
+    chirp_signal = torch.sin(phase)   # (num_steps, 27)，按 joint_order 排列
+
+    # 索引方向：trajectory 的列是「仿真关节顺序」，而 joint_order/bias/scale 是「配置顺序」。
+    # joint_ids[j] = 配置关节 j 对应的仿真列号，故用 trajectory[:, joint_ids] = X
+    # 把 X 的第 j 列写到仿真列 joint_ids[j]。
     trajectory = torch.zeros((num_steps, len(joint_ids)), device=env.unwrapped.device)
-    trajectory[:, :] = chirp_signal.unsqueeze(-1)
+    trajectory[:, joint_ids] = chirp_signal
     # ===========anymal quadrupedal============
     # for anymal quadrupedal robot
     # trajectory_directions = torch.tensor(
@@ -176,12 +241,15 @@ def main():
     # )
 
     # scale: min(half_range * 0.4, 80% torque limit, phys_cap)
+    # round-trip baseline: 手臂幅度整体下调。手腕是被肩/肘甩着走的（实测跟随度 604%），
+    # 所以减小手腕自身指令没用，必须减小肩肘幅度才能压住手腕撞击 hip 的问题。
+    # HIP_ROLL 也下调：它的 ω_n=1.05Hz/ζ=0.096 是全场最欠阻尼的（共振增益 ≈5×）。
     trajectory_scale = torch.tensor(
-        [0.500, 0.300, 0.700, 0.500, 0.272, 0.105,  # 左腿
-         0.500, 0.300, 0.700, 0.500, 0.272, 0.105,  # 右腿
+        [0.500, 0.200, 0.700, 0.500, 0.272, 0.105,  # 左腿 (HIP_ROLL 0.30→0.20)
+         0.500, 0.200, 0.700, 0.500, 0.272, 0.105,  # 右腿
          0.400,                                       # 腰
-         0.600, 0.400, 0.400, 0.400, 0.40, 0.05, 0.05,  # 左臂 (WRIST 0.25→0.10 避免力矩饱和)
-         0.600, 0.400, 0.400, 0.400, 0.40, 0.05, 0.05],  # 右臂
+         0.350, 0.300, 0.250, 0.300, 0.15, 0.05, 0.05,  # 左臂 (肩肘 0.60/0.40 → 0.35/0.30/0.25)
+         0.350, 0.300, 0.250, 0.300, 0.15, 0.05, 0.05],  # 右臂
         device=env.unwrapped.device
     )
     # ===========================

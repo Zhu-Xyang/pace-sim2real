@@ -36,11 +36,10 @@ S800_ACTUATOR_CFG = PaceDCMotorCfg(
         ".*WRIST.*": 150.0,
     },
 
+    # I_total 校正版：目标 ω_n ∈ [2,5] Hz, ζ ∈ [0.3, 0.7]（实测 0.318~0.684，0/14 欠阻尼）。
+    # 实测对比：用真机部署值 (kpkd_params.py) 时 ζ 掉到 0.056~0.674，WRIST_PITCH_R 冲击达
+    # 中位数的 6.8e4 倍（失稳），整体跟踪误差 max 从 1.45 → 2.17 rad。故 round-trip 基线用这套。
     stiffness={
-        # PD gains adjusted using I_total = Ia + I_link (from URDF downstream links):
-        #   ω_n = sqrt(kp / I_total),  ζ = (d + kd) / (2 * sqrt(kp * I_total))
-        # Target: ω_n ∈ [2, 5] Hz, ζ ∈ [0.3, 0.7] (minimal changes from original).
-        # Original design used Ia only; PhysX uses I_total, causing ζ to drop.
         ".*HIP_PITCH.*": 632.95, ".*HIP_ROLL.*": 742.19, ".*HIP_YAW.*": 83.67,
         ".*KNEE_PITCH.*": 365.77, ".*ANKLE_PITCH.*": 86.27, ".*ANKLE_ROLL.*": 40.47, ".*TORSO.*": 171.99,
         ".*SHOULDER_PITCH.*": 68.6, ".*SHOULDER_ROLL.*": 117.25, ".*SHOULDER_YAW.*": 43.0,
@@ -129,23 +128,25 @@ class S800PaceCfg(PaceCfg):
         # self.bounds_params[:27, 0] = 1e-4
         # self.bounds_params[:27, 1] = 1.0  # armature between 1e-5 - 1.0 [kgm2]
 
-        # --- Armature [0:27]: per-joint-type bounds centered on kpkd.py values ---
-        # Format: (lower, upper) for each joint type
+        # --- Armature [0:27]: per-joint-type bounds, bracket the round-trip GT ---
+        # GT is the 4-group ground truth injected by data_collection.py (see there).
+        # Bounds must straddle GT, otherwise the optimizer can never reach the true
+        # value and the round-trip test fails for a trivial reason.
         armature_bounds = {
-            "HIP_PITCH":      (0.05, 0.50),   # GT=0.2427
-            "HIP_ROLL":       (0.03, 0.30),   # GT=0.1411
-            "HIP_YAW":        (0.01, 0.15),   # GT=0.0449
-            "KNEE_PITCH":     (0.05, 0.50),   # GT=0.2427
-            "ANKLE_PITCH":    (0.005, 0.15),  # GT=0.0355
-            "ANKLE_ROLL":     (0.005, 0.15),  # GT=0.0355
-            "TORSO_YAW":      (0.01, 0.15),   # GT=0.0449
-            "SHOULDER_PITCH": (0.005, 0.15),  # GT=0.0355
-            "SHOULDER_ROLL":  (0.005, 0.15),  # GT=0.0355
-            "SHOULDER_YAW":   (0.005, 0.15),  # GT=0.0355
-            "ELBOW_PITCH":    (0.005, 0.15),  # GT=0.0355
-            "ELBOW_YAW":      (0.001, 0.03),  # GT=0.0067
-            "WRIST_PITCH":    (0.0005, 0.02), # GT=0.005
-            "WRIST_ROLL":     (0.0005, 0.02), # GT=0.005
+            "HIP_PITCH":      (0.05, 0.50),   # GT=0.24
+            "HIP_ROLL":       (0.03, 0.30),   # GT=0.14
+            "HIP_YAW":        (0.01, 0.15),   # GT=0.05
+            "KNEE_PITCH":     (0.05, 0.50),   # GT=0.24
+            "ANKLE_PITCH":    (0.005, 0.15),  # GT=0.05
+            "ANKLE_ROLL":     (0.005, 0.15),  # GT=0.05
+            "TORSO_YAW":      (0.01, 0.15),   # GT=0.05
+            "SHOULDER_PITCH": (0.005, 0.15),  # GT=0.05
+            "SHOULDER_ROLL":  (0.005, 0.15),  # GT=0.05
+            "SHOULDER_YAW":   (0.005, 0.15),  # GT=0.05
+            "ELBOW_PITCH":    (0.005, 0.15),  # GT=0.05
+            "ELBOW_YAW":      (0.001, 0.03),  # GT=0.008
+            "WRIST_PITCH":    (0.0005, 0.02), # GT=0.008
+            "WRIST_ROLL":     (0.0005, 0.02), # GT=0.008
         }
 
         damping_bounds = {
@@ -178,8 +179,10 @@ class S800PaceCfg(PaceCfg):
             self.bounds_params[27 + i, 0] = d_lo
             self.bounds_params[27 + i, 1] = d_hi
 
+        # friction [54:81] — 上限必须覆盖 data_collection.py 注入的真值(最大 1.0)。
+        # 曾设 0.6 而 GT=1.5：搜索空间不包含真值，round-trip 必然失败。
         self.bounds_params[54:81, 0] = 0.0
-        self.bounds_params[54:81, 1] = 0.6  # friction between 0.0 - 0.5
+        self.bounds_params[54:81, 1] = 2.0  # friction between 0.0 - 2.0 [Nm]
 
         self.bounds_params[81:108, 0] = -0.1
         self.bounds_params[81:108, 1] = 0.1  # bias between -0.1 - 0.1 [rad]
