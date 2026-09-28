@@ -14,6 +14,10 @@
 **/*.usdc
 **/*.usdz
 
+# URDF->USD converter byproducts (regenerated on every conversion)
+**/.asset_hash
+assets_robot/**/config.yaml
+
 # macOS
 .DS_Store
 ._*
