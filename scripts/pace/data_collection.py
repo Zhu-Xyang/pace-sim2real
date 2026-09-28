@@ -38,7 +38,6 @@ from torch import pi
 import pace_sim2real.tasks  # noqa: F401
 from pace_sim2real.utils import project_root
 
-
 def main():
     # parse configuration
     env_cfg = parse_env_cfg(
@@ -55,7 +54,7 @@ def main():
     articulation = env.unwrapped.scene["robot"]
 
     joint_order = env_cfg.sim2real.joint_order
-    joint_ids = torch.tensor([articulation.joint_names.index(name) for name in joint_order], device=env.unwrapped.device)
+    joint_ids = torch.tensor([articulation.joint_names.index(name) for name in joint_order], device=env.unwrapped.device, dtype=torch.int32)
 
     armature = torch.tensor([0.1] * len(joint_ids), device=env.unwrapped.device).unsqueeze(0)
     damping = torch.tensor([4.5] * len(joint_ids), device=env.unwrapped.device).unsqueeze(0)
@@ -64,15 +63,15 @@ def main():
     time_lag = torch.tensor([[5]], dtype=torch.int, device=env.unwrapped.device)
     env.reset()
 
-    articulation.write_joint_armature_to_sim(armature, joint_ids=joint_ids, env_ids=torch.arange(len(armature)))
-    articulation.data.default_joint_armature[:, joint_ids] = armature
-    articulation.write_joint_viscous_friction_coefficient_to_sim(damping, joint_ids=joint_ids, env_ids=torch.arange(len(damping)))
-    articulation.data.default_joint_viscous_friction_coeff[:, joint_ids] = damping
+    articulation.write_joint_armature_to_sim(armature, joint_ids=joint_ids, env_ids=torch.arange(len(armature), device=env.unwrapped.device, dtype=torch.int32))
+    articulation.data.joint_armature[:, joint_ids] = armature
+    articulation.write_joint_viscous_friction_coefficient_to_sim(damping, joint_ids=joint_ids, env_ids=torch.arange(len(damping), device=env.unwrapped.device, dtype=torch.int32))
+    articulation.data.joint_viscous_friction_coeff[:, joint_ids] = damping
     # note: modeling coulomb friction if joint_friction = joint_dynamic_friction
-    articulation.write_joint_friction_coefficient_to_sim(friction, joint_ids=joint_ids, env_ids=torch.tensor([0]))
-    articulation.data.default_joint_friction_coeff[:, joint_ids] = friction
-    articulation.write_joint_dynamic_friction_coefficient_to_sim(friction, joint_ids=joint_ids, env_ids=torch.tensor([0]))
-    articulation.data.default_joint_dynamic_friction_coeff[:, joint_ids] = friction
+    articulation.write_joint_friction_coefficient_to_sim(friction, joint_ids=joint_ids, env_ids=torch.tensor([0], device=env.unwrapped.device, dtype=torch.int32))
+    articulation.data.joint_friction_coeff[:, joint_ids] = friction
+    articulation.write_joint_dynamic_friction_coefficient_to_sim(friction, joint_ids=joint_ids, env_ids=torch.tensor([0], device=env.unwrapped.device, dtype=torch.int32))
+    articulation.data.joint_dynamic_friction_coeff[:, joint_ids] = friction
     drive_types = articulation.actuators.keys()
     for drive_type in drive_types:
         drive_indices = articulation.actuators[drive_type].joint_indices
@@ -155,18 +154,29 @@ def main():
 
     import matplotlib.pyplot as plt
 
-    for i in range(len(joint_ids)):
-        plt.figure()
-        plt.plot(t.cpu().numpy(), dof_pos_buffer[:, i].cpu().numpy(), label=f"{joint_order[i]} pos")
-        plt.plot(t.cpu().numpy(), dof_target_pos_buffer[:, i].cpu().numpy(), label=f"{joint_order[i]} target", linestyle='dashed')
-        plt.title(f"Joint {joint_order[i]} Trajectory")
-        plt.xlabel("Time [s]")
-        plt.ylabel("Joint position [rad]")
-        plt.grid()
-        plt.legend()
-        plt.tight_layout()
-        plt.show()
+    n_joints = len(joint_ids)
+    n_cols = 4
+    n_rows = (n_joints + n_cols - 1) // n_cols
+    fig, axes = plt.subplots(n_rows, n_cols, figsize=(n_cols * 5, n_rows * 3), sharex=True)
+    axes_flat = axes.flatten() if n_joints > 1 else [axes]
 
+    for i in range(n_joints):
+        ax = axes_flat[i]
+        ax.plot(t.cpu().numpy(), dof_pos_buffer[:, i].cpu().numpy(), label="pos", linewidth=2)
+        ax.plot(t.cpu().numpy(), dof_target_pos_buffer[:, i].cpu().numpy(), label="target", linestyle='dashed')
+        ax.set_title(joint_order[i], fontsize=9)
+        ax.set_xlabel("Time [s]", fontsize=8)
+        ax.set_ylabel("Pos [rad]", fontsize=8)
+        ax.grid(True)
+        ax.legend(fontsize=7)
+        ax.tick_params(labelsize=7)
+
+    for i in range(n_joints, len(axes_flat)):
+        axes_flat[i].set_visible(False)
+
+    fig.suptitle("Data Collection — All Joints", fontsize=12)
+    plt.tight_layout()
+    plt.show()
 
 if __name__ == "__main__":
     # run the main function
