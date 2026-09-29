@@ -36,15 +36,25 @@ S800_ACTUATOR_CFG = PaceDCMotorCfg(
         ".*WRIST.*": 150.0,
     },
 
-    # I_total 校正版：目标 ω_n ∈ [2,5] Hz, ζ ∈ [0.3, 0.7]（实测 0.318~0.684，0/14 欠阻尼）。
-    # 实测对比：用真机部署值 (kpkd_params.py) 时 ζ 掉到 0.056~0.674，WRIST_PITCH_R 冲击达
-    # 中位数的 6.8e4 倍（失稳），整体跟踪误差 max 从 1.45 → 2.17 rad。故 round-trip 基线用这套。
+    # ── 方案 C（含延时稳定性修正）────────────────────────────────────────────
+    # 原文依据 (PACE p.7)：「Increasing the gains shifts the dominant poles to higher
+    # frequencies... empirically, higher gains did not improve identification quality but
+    # instead pushed the closed-loop poles beyond the feasible excitation bandwidth.」
+    # 即闭环极点 ω_cl = sqrt(kp/I_total) 要落在 chirp 带内，否则关节全程紧跟参考、
+    # 跟踪误差 e ≈ J·q̈_des/kp 过小 → armature 不可辨识。
+    #
+    # ⚠️ 但还有第二个约束：环路延时。指令延时 5 步 @400Hz = 12.5ms，贡献相位滞后 ω_c·T。
+    #    PM = atan(kd·ω_c/kp) - ω_c·T  ⇒  在 T=12.5ms 下 ω_c 硬上限约 7.8Hz。
+    #    直接照搬 kpkd 的 kp 会让 5 个轻惯量关节越界 —— ELBOW_YAW 的 PM=-12°，
+    #    实测无预警地起振，振荡频率 12.5Hz ≈ 预测的增益穿越频率 12.3Hz。
+    #    这 5 个的 kp 下调到 PM=30°（其余 9 类保留 kpkd 原值）。
+    #    注：这两条约束同向 —— 降 kp 同时把极点拉回 chirp 带内。
     stiffness={
-        ".*HIP_PITCH.*": 632.95, ".*HIP_ROLL.*": 742.19, ".*HIP_YAW.*": 83.67,
-        ".*KNEE_PITCH.*": 365.77, ".*ANKLE_PITCH.*": 86.27, ".*ANKLE_ROLL.*": 40.47, ".*TORSO.*": 171.99,
-        ".*SHOULDER_PITCH.*": 68.6, ".*SHOULDER_ROLL.*": 117.25, ".*SHOULDER_YAW.*": 43.0,
-        ".*ELBOW_PITCH.*": 68.6, ".*ELBOW_YAW.*": 10.04,
-        ".*WRIST.*": 12.5,
+        ".*HIP_PITCH.*": 240.0, ".*HIP_ROLL.*": 200.0, ".*HIP_YAW.*": 35.11,
+        ".*KNEE_PITCH.*": 240.0, ".*ANKLE_PITCH.*": 90.0, ".*ANKLE_ROLL.*": 17.16, ".*TORSO.*": 113.0,
+        ".*SHOULDER_PITCH.*": 90.0, ".*SHOULDER_ROLL.*": 90.0, ".*SHOULDER_YAW.*": 17.89,
+        ".*ELBOW_PITCH.*": 90.0, ".*ELBOW_YAW.*": 3.99,
+        ".*WRIST_PITCH.*": 12.5, ".*WRIST_ROLL.*": 5.17,
     },
 
     # stiffness={
@@ -55,12 +65,16 @@ S800_ACTUATOR_CFG = PaceDCMotorCfg(
     #     ".*WRIST.*": 8.0,
     # },
 
+    # kd = 2ζ·sqrt(kp·I_total) − d，取 ζ = 0.40，kp 用上面调整后的值。
+    # 注：上一版曾据「ω_cl 只由 kp 决定、ζ 主要由 kd 决定」把两者独立设定 —— 那个说法
+    # 只在无延时模型里成立。加上 12.5ms 延时后两者通过相位裕度耦合，必须先按稳定性
+    # 定下 kp，再算 kd。
     damping={
-        ".*HIP_PITCH.*": 30.16, ".*HIP_ROLL.*": 35.64, ".*HIP_YAW.*": 2.64,
-        ".*KNEE_PITCH.*": 16.75, ".*ANKLE_PITCH.*": 3.83, ".*ANKLE_ROLL.*": 1.26, ".*TORSO.*": 7.63,
-        ".*SHOULDER_PITCH.*": 2.92, ".*SHOULDER_ROLL.*": 5.38, ".*SHOULDER_YAW.*": 1.37,
-        ".*ELBOW_PITCH.*": 2.92, ".*ELBOW_YAW.*": 0.34,
-        ".*WRIST_PITCH.*": 0.43, ".*WRIST_ROLL.*": 0.18,
+        ".*HIP_PITCH.*": 22.8458, ".*HIP_ROLL.*": 22.565, ".*HIP_YAW.*": 0.3885,
+        ".*KNEE_PITCH.*": 16.9833, ".*ANKLE_PITCH.*": 5.0268, ".*ANKLE_ROLL.*": 0.175, ".*TORSO.*": 7.744,
+        ".*SHOULDER_PITCH.*": 4.3986, ".*SHOULDER_ROLL.*": 5.943, ".*SHOULDER_YAW.*": 0.2107,
+        ".*ELBOW_PITCH.*": 4.3986, ".*ELBOW_YAW.*": 0.0621,
+        ".*WRIST_PITCH.*": 0.5657, ".*WRIST_ROLL.*": 0.1214,
     },
 
     # damping={

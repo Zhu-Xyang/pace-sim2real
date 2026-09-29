@@ -130,15 +130,15 @@ if plot_trajectory:
 # Ground-truth values used in data_collection.py to generate the "real" data.
 # These must be kept in sync with scripts/pace/data_collection.py.
 GT_ARMATURE = {
-    "J00_HIP_PITCH_L": 0.2427264, "J01_HIP_ROLL_L": 0.14110848, "J02_HIP_YAW_L": 0.0448737,
-    "J03_KNEE_PITCH_L": 0.2427264, "J04_ANKLE_PITCH_L": 0.0354625, "J05_ANKLE_ROLL_L": 0.0354625,
-    "J06_HIP_PITCH_R": 0.2427264, "J07_HIP_ROLL_R": 0.14110848, "J08_HIP_YAW_R": 0.0448737,
-    "J09_KNEE_PITCH_R": 0.2427264, "J10_ANKLE_PITCH_R": 0.0354625, "J11_ANKLE_ROLL_R": 0.0354625,
-    "J12_TORSO_YAW": 0.0448737,
-    "J13_SHOULDER_PITCH_L": 0.0354625, "J14_SHOULDER_ROLL_L": 0.0354625, "J15_SHOULDER_YAW_L": 0.0354625,
-    "J16_ELBOW_PITCH_L": 0.0354625, "J17_ELBOW_YAW_L": 0.00671625, "J18_WRIST_PITCH_L": 0.005, "J19_WRIST_ROLL_L": 0.005,
-    "J27_SHOULDER_PITCH_R": 0.0354625, "J28_SHOULDER_ROLL_R": 0.0354625, "J29_SHOULDER_YAW_R": 0.0354625,
-    "J30_ELBOW_PITCH_R": 0.0354625, "J31_ELBOW_YAW_R": 0.00671625, "J32_WRIST_PITCH_R": 0.005, "J33_WRIST_ROLL_R": 0.005,
+    "J00_HIP_PITCH_L": 0.24, "J01_HIP_ROLL_L": 0.14, "J02_HIP_YAW_L": 0.05,
+    "J03_KNEE_PITCH_L": 0.24, "J04_ANKLE_PITCH_L": 0.05, "J05_ANKLE_ROLL_L": 0.05,
+    "J06_HIP_PITCH_R": 0.24, "J07_HIP_ROLL_R": 0.14, "J08_HIP_YAW_R": 0.05,
+    "J09_KNEE_PITCH_R": 0.24, "J10_ANKLE_PITCH_R": 0.05, "J11_ANKLE_ROLL_R": 0.05,
+    "J12_TORSO_YAW": 0.05,
+    "J13_SHOULDER_PITCH_L": 0.05, "J14_SHOULDER_ROLL_L": 0.05, "J15_SHOULDER_YAW_L": 0.05,
+    "J16_ELBOW_PITCH_L": 0.05, "J17_ELBOW_YAW_L": 0.008, "J18_WRIST_PITCH_L": 0.008, "J19_WRIST_ROLL_L": 0.008,
+    "J27_SHOULDER_PITCH_R": 0.05, "J28_SHOULDER_ROLL_R": 0.05, "J29_SHOULDER_YAW_R": 0.05,
+    "J30_ELBOW_PITCH_R": 0.05, "J31_ELBOW_YAW_R": 0.008, "J32_WRIST_PITCH_R": 0.008, "J33_WRIST_ROLL_R": 0.008,
 }
 
 GT_VISCOUS = {
@@ -153,16 +153,21 @@ GT_VISCOUS = {
     "J30_ELBOW_PITCH_R": 0.5, "J31_ELBOW_YAW_R": 0.1, "J32_WRIST_PITCH_R": 0.1, "J33_WRIST_ROLL_R": 0.1,
 }
 
-    # damping = torch.tensor([
-    #     1.6, 1.6, 1.0, 1.6, 0.5, 0.5,  # 左腿: HIP_PITCH, HIP_ROLL, HIP_YAW, KNEE, ANKLE_P, ANKLE_R
-    #     1.6, 1.6, 1.0, 1.6, 0.5, 0.5,  # 右腿
-    #     1.0,                             # 腰: TORSO_YAW
-    #     0.5, 0.5, 0.5, 0.5, 0.1, 0.1, 0.1,  # 左臂: SHOULDER_P/R/Y, ELBOW_P, ELBOW_Y, WRIST_P/R
-    #     0.5, 0.5, 0.5, 0.5, 0.1, 0.1, 0.1,  # 右臂
-    # ], device=env.unwrapped.device).unsqueeze(0)
+GT_FRICTION = {
+    "J00_HIP_PITCH_L": 1.0, "J01_HIP_ROLL_L": 1.0, "J02_HIP_YAW_L": 0.3,
+    "J03_KNEE_PITCH_L": 1.0, "J04_ANKLE_PITCH_L": 0.3, "J05_ANKLE_ROLL_L": 0.3,
+    "J06_HIP_PITCH_R": 1.0, "J07_HIP_ROLL_R": 1.0, "J08_HIP_YAW_R": 0.3,
+    "J09_KNEE_PITCH_R": 1.0, "J10_ANKLE_PITCH_R": 0.3, "J11_ANKLE_ROLL_R": 0.3,
+    "J12_TORSO_YAW": 0.3,
+    "J13_SHOULDER_PITCH_L": 0.3, "J14_SHOULDER_ROLL_L": 0.3, "J15_SHOULDER_YAW_L": 0.3,
+    "J16_ELBOW_PITCH_L": 0.3, "J17_ELBOW_YAW_L": 0.05, "J18_WRIST_PITCH_L": 0.05, "J19_WRIST_ROLL_L": 0.05,
+    "J27_SHOULDER_PITCH_R": 0.3, "J28_SHOULDER_ROLL_R": 0.3, "J29_SHOULDER_YAW_R": 0.3,
+    "J30_ELBOW_PITCH_R": 0.3, "J31_ELBOW_YAW_R": 0.05, "J32_WRIST_PITCH_R": 0.05, "J33_WRIST_ROLL_R": 0.05,
+}
+
 
 # GT_VISCOUS = 1.6    # all joints
-GT_FRICTION = 0.2   # all joints
+# GT_FRICTION = 0.2   # all joints
 GT_BIAS = 0.05      # all joints
 GT_DELAY = 5        # sim steps
 
@@ -210,7 +215,7 @@ if plot_table:
         # Ground truth
         a_gt = GT_ARMATURE.get(name, 0.0)
         v_gt = GT_VISCOUS.get(name, 0.0)
-        f_gt = GT_FRICTION
+        f_gt = GT_FRICTION.get(name, 0.0)
         b_gt = GT_BIAS
 
         # Identified
