@@ -26,7 +26,7 @@ S800_ACTUATOR_CFG = PaceDCMotorCfg(
         ".*HIP_PITCH.*": 415.0, ".*HIP_ROLL.*": 370.0, ".*HIP_YAW.*": 222.0,
         ".*KNEE_PITCH.*": 415.0, ".*ANKLE.*": 160.0, ".*TORSO.*": 222.0,
         ".*SHOULDER.*": 160.0, ".*ELBOW_PITCH.*": 160.0, ".*ELBOW_YAW.*": 52.0,
-        ".*WRIST.*": 20.0,
+        ".*WRIST.*": 5.0,
     },
 
     velocity_limit={
@@ -180,6 +180,31 @@ class S800PaceCfg(PaceCfg):
             "WRIST_ROLL":     (0.0, 0.5), # GT=0.1
         }
 
+        # --- friction bounds [54:81]: 按关节缩放，不从 round-trip GT 反推 ---
+        # 上界 = FRICTION_PEAK_FRAC × 关节侧峰值力矩。
+        #
+        # 为什么不能照 GT 设：round-trip 的 GT 是我们自己注入的已知值，用它去定
+        # 搜索区间是循环论证 —— 区间永远"刚好"包住答案，测不出真机上真值是否越界。
+        # 真机辨识时摩擦真值未知，区间只能来自独立物理量。
+        #
+        # 物理依据：齿轮传动的负载无关摩擦(库仑项)约为峰值力矩的 0.5~3%
+        # （谐波减速器偏高、行星偏低）。取 2% 作标称。
+        # ⚠️ 这个系数是全链条里唯一需要真机标定的量，标定方法：关节以极低速度
+        #    匀速正/反向扫掠，取正反向力矩差的一半即为库仑摩擦。
+        # 上界宁宽勿窄：真值一旦越界，CMA-ES 会贴着边界收敛且不报错，表现是
+        # 一个看似正常的错值 —— 比收敛慢严重得多。
+        FRICTION_PEAK_FRAC = 0.01
+        PEAK_TORQUE = {
+            # 来自 assets_robot/engineai_S800/xml/serial_actuators.xml 的 ctrlrange
+            # （gear=1，减速比已折进该值，单位即关节侧 Nm）
+            "HIP_PITCH":      415.0, "HIP_ROLL": 370.0, "HIP_YAW": 222.0,
+            "KNEE_PITCH":     415.0, "ANKLE_PITCH": 160.0, "ANKLE_ROLL": 160.0,
+            "TORSO_YAW":      222.0, "SHOULDER_PITCH": 160.0, "SHOULDER_ROLL": 160.0,
+            "SHOULDER_YAW":   160.0, "ELBOW_PITCH": 160.0,
+            "ELBOW_YAW":       52.0,
+            "WRIST_PITCH":     5.0, "WRIST_ROLL": 5.0,
+        }
+
         print(f"joint order = {self.joint_order}")
 
         for i, name in enumerate(self.joint_order):
@@ -192,11 +217,9 @@ class S800PaceCfg(PaceCfg):
             d_lo, d_hi = damping_bounds[jtype]
             self.bounds_params[27 + i, 0] = d_lo
             self.bounds_params[27 + i, 1] = d_hi
-
-        # friction [54:81] — 上限必须覆盖 data_collection.py 注入的真值(最大 1.0)。
-        # 曾设 0.6 而 GT=1.5：搜索空间不包含真值，round-trip 必然失败。
-        self.bounds_params[54:81, 0] = 0.0
-        self.bounds_params[54:81, 1] = 2.0  # friction between 0.0 - 2.0 [Nm]
+            # friction (coulomb) [54:81] — 下界一律 0（摩擦可以接近 0）
+            self.bounds_params[54 + i, 0] = 0.0
+            self.bounds_params[54 + i, 1] = FRICTION_PEAK_FRAC * PEAK_TORQUE[jtype]
 
         self.bounds_params[81:108, 0] = -0.1
         self.bounds_params[81:108, 1] = 0.1  # bias between -0.1 - 0.1 [rad]

@@ -79,6 +79,8 @@ def main():
         sigma=env_cfg.sim2real.cmaes.sigma,
         save_interval=env_cfg.sim2real.cmaes.save_interval,
         save_optimization_process=env_cfg.sim2real.cmaes.save_optimization_process,
+        segment_edges_hz=env_cfg.sim2real.cmaes.segment_edges_hz,
+        sweep_kind=env_cfg.sim2real.cmaes.sweep_kind,
     )
 
     env.reset()

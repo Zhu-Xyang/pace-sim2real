@@ -1,0 +1,525 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>PACE 系统辨识 · 原理梳理与人形机器人适配笔记</title>
+<style>
+  :root{
+    --bg:#ffffff; --fg:#1c1e21; --muted:#5f6672; --line:#e3e6ea;
+    --code-bg:#f6f8fa; --code-fg:#1c1e21;
+    --accent:#2f6feb; --accent-soft:#eef3fe;
+    --warn:#b45309; --warn-bg:#fff8ed; --warn-line:#f0c88a;
+    --danger:#b42318; --danger-bg:#fef4f2; --danger-line:#f3b5ae;
+    --ok:#067647; --ok-bg:#f0fdf4; --ok-line:#a5d6b6;
+    --kw:#a626a4; --str:#50a14f; --num:#c18401; --com:#9aa1ac; --fn:#4078f2;
+  }
+  @media (prefers-color-scheme: dark){
+    :root{
+      --bg:#16181c; --fg:#e4e7eb; --muted:#9aa1ac; --line:#2b2f36;
+      --code-bg:#1e2126; --code-fg:#e4e7eb;
+      --accent:#6ea0ff; --accent-soft:#1c2740;
+      --warn:#e8a33d; --warn-bg:#2a2216; --warn-line:#5c4620;
+      --danger:#f0776c; --danger-bg:#2c1b19; --danger-line:#5e2f2a;
+      --ok:#5cc08a; --ok-bg:#16241c; --ok-line:#2f5540;
+      --kw:#c678dd; --str:#98c379; --num:#d19a66; --com:#7d848f; --fn:#61afef;
+    }
+  }
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{
+    margin:0; background:var(--bg); color:var(--fg);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;
+    font-size:16px; line-height:1.75; -webkit-font-smoothing:antialiased;
+  }
+  .wrap{max-width:900px; margin:0 auto; padding:56px 28px 120px}
+  header{border-bottom:1px solid var(--line); padding-bottom:28px; margin-bottom:12px}
+  h1{font-size:30px; line-height:1.3; margin:0 0 10px; letter-spacing:-.02em}
+  .sub{color:var(--muted); font-size:15px; margin:0}
+  .meta{color:var(--muted); font-size:13.5px; margin-top:16px}
+  .meta code{font-size:12.5px}
+
+  h2{font-size:22px; margin:52px 0 14px; padding-top:14px; letter-spacing:-.01em; border-top:1px solid var(--line)}
+  h2 .n{color:var(--accent); font-variant-numeric:tabular-nums; margin-right:10px}
+  h3{font-size:17px; margin:30px 0 10px; letter-spacing:-.005em}
+  h4{font-size:15px; margin:22px 0 8px; color:var(--muted); font-weight:600}
+  p{margin:12px 0}
+  ul,ol{padding-left:22px; margin:12px 0}
+  li{margin:7px 0}
+  strong{font-weight:650}
+  a{color:var(--accent); text-decoration:none; border-bottom:1px solid transparent}
+  a:hover{border-bottom-color:var(--accent)}
+
+  code{font-family:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace; font-size:13.5px;
+       background:var(--code-bg); padding:1.5px 5px; border-radius:4px}
+  pre{background:var(--code-bg); color:var(--code-fg); padding:16px 18px; border-radius:8px;
+      overflow-x:auto; border:1px solid var(--line); margin:14px 0}
+  pre code{background:none; padding:0; font-size:13px; line-height:1.65}
+  .kw{color:var(--kw)} .str{color:var(--str)} .num{color:var(--num)}
+  .com{color:var(--com); font-style:italic} .fn{color:var(--fn)}
+
+  table{border-collapse:collapse; width:100%; margin:16px 0; font-size:14.5px}
+  th,td{text-align:left; padding:9px 12px; border-bottom:1px solid var(--line); vertical-align:top}
+  th{font-weight:650; color:var(--muted); font-size:13px; text-transform:uppercase; letter-spacing:.04em;
+     border-bottom:1.5px solid var(--line)}
+  tbody tr:last-child td{border-bottom:none}
+  td code{font-size:12.5px}
+  .num-col{font-variant-numeric:tabular-nums}
+
+  .box{border:1px solid var(--line); border-left-width:3px; border-radius:6px; padding:14px 18px; margin:18px 0; font-size:15px}
+  .box p:first-child{margin-top:0} .box p:last-child{margin-bottom:0}
+  .box .label{font-weight:650; font-size:12.5px; text-transform:uppercase; letter-spacing:.05em; display:block; margin-bottom:6px}
+  .warn{background:var(--warn-bg); border-color:var(--warn-line); border-left-color:var(--warn)}
+  .warn .label{color:var(--warn)}
+  .danger{background:var(--danger-bg); border-color:var(--danger-line); border-left-color:var(--danger)}
+  .danger .label{color:var(--danger)}
+  .ok{background:var(--ok-bg); border-color:var(--ok-line); border-left-color:var(--ok)}
+  .ok .label{color:var(--ok)}
+  .info{background:var(--accent-soft); border-color:var(--accent); border-left-color:var(--accent)}
+  .info .label{color:var(--accent)}
+
+  .toc{background:var(--code-bg); border:1px solid var(--line); border-radius:8px; padding:18px 24px; margin:28px 0 8px}
+  .toc ol{margin:0; padding-left:20px; columns:2; column-gap:32px}
+  .toc li{margin:5px 0; break-inside:avoid}
+  @media(max-width:640px){ .toc ol{columns:1} }
+
+  .eq{background:var(--code-bg); border:1px solid var(--line); border-radius:8px;
+      padding:20px 18px; margin:18px 0; text-align:center; overflow-x:auto}
+  .eq .line{font-family:ui-monospace,Menlo,Consolas,monospace; font-size:15px; line-height:2.1; white-space:nowrap}
+  .ubr{display:inline-block; border-bottom:2px solid var(--accent); padding-bottom:3px}
+  .ubr2{display:inline-block; border-bottom:2px solid var(--warn); padding-bottom:3px}
+  .eq .cap{font-size:12.5px; color:var(--muted); margin-top:14px; line-height:1.6}
+  .sw{display:inline-block; width:9px; height:9px; border-radius:2px; vertical-align:middle; margin-right:5px}
+
+  .flow{display:flex; align-items:stretch; gap:8px; flex-wrap:wrap; margin:20px 0}
+  .step{flex:1 1 150px; background:var(--code-bg); border:1px solid var(--line); border-radius:8px; padding:12px 14px}
+  .step .t{font-weight:650; font-size:14px; margin-bottom:4px}
+  .step .d{font-size:12.5px; color:var(--muted); line-height:1.55}
+  .step.hl{background:var(--accent-soft); border-color:var(--accent)}
+
+  .chk{list-style:none; padding-left:0}
+  .chk li{padding-left:30px; position:relative; margin:11px 0}
+  .chk li::before{content:""; position:absolute; left:0; top:7px; width:15px; height:15px;
+                  border:1.5px solid var(--muted); border-radius:4px}
+
+  footer{margin-top:64px; padding-top:20px; border-top:1px solid var(--line); color:var(--muted); font-size:13px}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header>
+  <h1>PACE 系统辨识 · 原理梳理与人形机器人适配笔记</h1>
+  <p class="sub">基于 <code>pace-sim2real</code> 源码走读 —— CMA-ES 演化辨识的工作机制、仿真验证方法，以及从 ANYmal（12 DOF 四足）迁移到人形平台时必须处理的问题。</p>
+  <p class="meta">
+    代码基准：<code>pace-sim2real-main</code> · ETH Zurich RSL · Apache-2.0<br>
+    运行依赖：Isaac Sim 5.0 + Isaac Lab 0.46.2 + Python 3.11 · 论文：<a href="https://arxiv.org/pdf/2509.06342">arXiv:2509.06342</a>
+  </p>
+</header>
+
+<nav class="toc">
+  <ol>
+    <li><a href="#s1">算法在做什么</a></li>
+    <li><a href="#s2">仿真中的 Ground Truth 验证</a></li>
+    <li><a href="#s3">激励轨迹：全关节同步 chirp</a></li>
+    <li><a href="#s4">科氏力与重力在哪里</a></li>
+    <li><a href="#s5">数据采集：仿真还是真机</a></li>
+    <li><a href="#s6">模型文件的来源</a></li>
+    <li><a href="#s7">人形适配 · 必改项</a></li>
+    <li><a href="#s8">人形适配 · 三个静默出错的坑</a></li>
+    <li><a href="#s9">人形适配 · 物理层面问题</a></li>
+    <li><a href="#s10">推进顺序 Checklist</a></li>
+  </ol>
+</nav>
+
+<!-- ============================================ -->
+<h2 id="s1"><span class="n">1</span>算法在做什么</h2>
+
+<p>PACE 用 <strong>CMA-ES 无导数黑箱优化</strong> 辨识执行器与关节参数。核心思路是<strong>把仿真器本身当作回归矩阵</strong>：不写任何动力学方程，而是让大量并行环境各带一组候选参数去复现同一条轨迹，谁的关节位置残差小谁胜出。</p>
+
+<div class="flow">
+  <div class="step"><div class="t">① 采集</div><div class="d">悬挂机器人，跑 chirp 激励，记录目标位置与实测位置</div></div>
+  <div class="step hl"><div class="t">② 辨识</div><div class="d">4096 个并行环境各持一组候选参数复现轨迹，CMA-ES 迭代进化</div></div>
+  <div class="step"><div class="t">③ 验证</div><div class="d">绘制最优轨迹与原始数据对比，在未见轨迹上做留出验证</div></div>
+  <div class="step"><div class="t">④ 部署</div><div class="d">把参数写入学习环境的 articulation 与 actuator</div></div>
+</div>
+
+<h3>待辨识的 49 个参数（ANYmal，12 关节）</h3>
+<table>
+  <thead><tr><th>参数</th><th>数量</th><th>物理含义</th><th>作用位置</th></tr></thead>
+  <tbody>
+    <tr><td><code>armature</code></td><td class="num-col">12</td><td>反射转子惯量 ≈ <code>n²·I_rotor</code></td><td>质量矩阵对角线</td></tr>
+    <tr><td><code>viscous_friction</code></td><td class="num-col">12</td><td>粘性阻尼 [Nm·s/rad]</td><td>正比于自身关节速度</td></tr>
+    <tr><td><code>friction</code></td><td class="num-col">12</td><td>库仑摩擦 [Nm]（static = dynamic）</td><td><code>sign(q̇)</code> 项</td></tr>
+    <tr><td><code>encoder_bias</code></td><td class="num-col">12</td><td>编码器零位偏差 [rad]</td><td>控制器读数偏移</td></tr>
+    <tr><td><code>delay</code></td><td class="num-col">1</td><td>力矩下发延迟 [sim step]</td><td>全局，整数离散</td></tr>
+  </tbody>
+</table>
+
+<p>损失函数极简 —— 关节位置残差的平方和（<code>optim/cma_es.py:73</code>）：</p>
+<pre><code><span class="kw">self</span>.scores += torch.<span class="fn">sum</span>(torch.<span class="fn">square</span>(sim_dof_pos - real_dof_pos - <span class="kw">self</span>.sim_params[:, <span class="kw">self</span>.bias_idx]), dim=<span class="num">1</span>)</code></pre>
+<p>注意 bias 是<strong>从残差里减掉</strong>的 —— 它既是待辨识量，也参与误差定义（残差被搬到编码器坐标系下比较）。</p>
+
+<div class="box info">
+  <span class="label">为什么不用经典最小二乘</span>
+  <p>经典做法是写成参数线性形式 <code>τ = Y(q,q̇,q̈)·θ</code> 后做回归。这条路在这里走不通：<strong>(1)</strong> 需要力矩测量，而残差建在关节位置上；<strong>(2)</strong> 库仑摩擦的 <code>sign(q̇)</code> 不是参数线性的；<strong>(3)</strong> 延迟根本无法写进回归矩阵。代价是慢（RTX 3080 上约 2h15m），收益是模型里想放什么非线性都行。</p>
+</div>
+
+<!-- ============================================ -->
+<h2 id="s2"><span class="n">2</span>仿真中的 Ground Truth 验证</h2>
+
+<p>仓库<strong>默认跑的就是 sim-to-sim 带 GT 的流程</strong>，官方文档称之为 "proof-of-correctness"。数据集名字 <code>anymal_d_sim</code>、配置里 <code>robot_name = "anymal_d_sim"</code> 都说明作者本来就是拿仿真数据当"假的真机数据"。</p>
+
+<h3>GT 设在哪里</h3>
+<p><code>scripts/pace/data_collection.py:60-64</code>，在 <code>env.reset()</code> 之后直接写进物理引擎：</p>
+<pre><code>armature  = <span class="num">0.1</span>    <span class="com"># kg·m²，12 个关节全一样</span>
+damping   = <span class="num">4.5</span>    <span class="com"># 粘性摩擦 Nm·s/rad</span>
+friction  = <span class="num">0.05</span>   <span class="com"># 库仑摩擦（static == dynamic）</span>
+bias      = <span class="num">0.05</span>   <span class="com"># 编码器零位偏差 rad</span>
+time_lag  = <span class="num">5</span>      <span class="com"># 延迟，单位 sim step（400 Hz → 12.5 ms）</span></code></pre>
+
+<h3>搜索边界把 GT 全包在里面</h3>
+<table>
+  <thead><tr><th>参数</th><th>GT</th><th>搜索范围</th><th>备注</th></tr></thead>
+  <tbody>
+    <tr><td>armature</td><td class="num-col">0.1</td><td class="num-col">[1e-5, 1.0]</td><td>kg·m²</td></tr>
+    <tr><td>viscous</td><td class="num-col">4.5</td><td class="num-col">[0, 7.0]</td><td>Nm·s/rad</td></tr>
+    <tr><td>friction</td><td class="num-col">0.05</td><td class="num-col">[0, 0.5]</td><td>Nm</td></tr>
+    <tr><td>bias</td><td class="num-col">0.05</td><td class="num-col">[-0.1, 0.1]</td><td>rad</td></tr>
+    <tr><td>delay</td><td class="num-col">5</td><td class="num-col">[0, 10]</td><td>sim step，<strong>整数截断</strong></td></tr>
+  </tbody>
+</table>
+
+<p>因为采集端和辨识端用<strong>同一个 <code>PaceDCMotor</code> 模型</strong>（同样的编码器偏差注入、同样的 <code>DelayBuffer</code>、同样的 <code>friction == dynamic_friction</code> 库仑建模），模型类完全匹配、无结构误差，所以能收敛到 <strong>~1e-12</strong>。这个数量级本身就是"GT 可精确恢复"的证据。</p>
+
+<div class="box warn">
+  <span class="label">自己改 GT 时的四个注意点</span>
+  <ul style="margin-bottom:0">
+    <li><strong>改完 GT 记得检查 bounds。</strong> GT 落在边界外则永远搜不到，但 score 仍会降到某个"看起来不错"的值，很有迷惑性。</li>
+    <li><strong>delay 是整数截断的</strong>（<code>.to(torch.int)</code>），恢复 "5" 实际落进 <code>[5, 6)</code>，别指望连续量精度。</li>
+    <li><strong>默认 12 个关节 GT 是同一个值</strong>，12 维搜索空间实际只有 1 个有效自由度，恢复难度被大大低估。建议设成逐关节不同。</li>
+    <li><strong>armature 与 viscous/friction 存在耦合</strong>，单条轨迹下可能有多组参数拟合得一样好。sim-to-sim 下被模型完全匹配掩盖了。</li>
+  </ul>
+</div>
+
+<h3>质量阈值</h3>
+<p>经验上 <strong>score &lt; 0.005</strong> 表示高质量拟合，通常带来良好的 sim-to-real 迁移；ANYmal 用真实数据可达 <strong>0.003</strong>（论文 Figure 9）。真机数据收敛不到 1e-12 是正常的 —— 模型失配和传感器噪声都在。</p>
+
+<!-- ============================================ -->
+<h2 id="s3"><span class="n">3</span>激励轨迹：全关节同步 chirp</h2>
+
+<p><strong>所有关节同时跑，且用同一个 chirp 信号、同一个相位</strong>，只是每个关节做了不同的仿射变换。没有单关节逐个辨识的模式。</p>
+
+<pre><code>phase = <span class="num">2</span>*pi*(f0*t + (f1-f0)/(<span class="num">2</span>*duration)*t**<span class="num">2</span>)   <span class="com"># 线性 chirp 0.1→10 Hz, 20 s</span>
+chirp_signal = torch.<span class="fn">sin</span>(phase)                    <span class="com"># 只有一条标量信号</span>
+
+trajectory[:, :] = chirp_signal.<span class="fn">unsqueeze</span>(-<span class="num">1</span>)      <span class="com"># 12 列全部复制同一条</span>
+trajectory[:, joint_ids] = (trajectory[:, joint_ids] + bias) * directions * scale</code></pre>
+
+<table>
+  <thead><tr><th>关节</th><th>bias</th><th>scale</th><th>目标范围 [rad]</th></tr></thead>
+  <tbody>
+    <tr><td>HAA</td><td class="num-col">0.0</td><td class="num-col">0.25</td><td class="num-col">±0.25</td></tr>
+    <tr><td>HFE</td><td class="num-col">0.4</td><td class="num-col">0.5</td><td class="num-col">[-0.3, 0.7]</td></tr>
+    <tr><td>KFE</td><td class="num-col">0.8</td><td class="num-col">-2.0</td><td class="num-col">[-3.6, 0.4]</td></tr>
+  </tbody>
+</table>
+
+<p><code>directions = [1,1,1,-1,1,1,1,-1,-1,-1,-1,-1]</code> 是 ANYmal 的左右／前后镜像约定，让四条腿在各自坐标系下做相同动作。每个仿真步（<code>decimation=1</code>，400 Hz）更新一次目标，20 秒共 8000 步。</p>
+
+<h3>为什么同时跑不会毁掉可辨识性</h3>
+<ol>
+  <li><strong>机器人被固定在空中</strong>（<code>fix_root_link = True</code>）。base 固定 + 无接触 ⟹ 四条腿在动力学上<strong>互相完全解耦</strong>，每条腿是独立的 3-DOF 悬挂链。"四条腿同相"对辨识毫无影响。</li>
+  <li><strong>49 个参数全是"对角"效应。</strong> 损失虽是标量，但每个关节的位置残差是独立观测通道，各自约束自己的参数。</li>
+</ol>
+<p>所以真正的并发只发生在<strong>同一条腿内部的 HAA/HFE/KFE 之间</strong>（惯量耦合）。</p>
+
+<div class="box warn">
+  <span class="label">一个值得注意的设计</span>
+  <p>同一条腿内三个关节的目标是<strong>严格仿射相关</strong>的。以 LF 腿为例：<code>LF_HFE = 2×LF_HAA + 0.2</code>，<code>LF_KFE = -8×LF_HAA - 1.6</code> —— 腿内三个自由度实际只有 <strong>1 个独立激励自由度</strong>。</p>
+  <p>常规系统辨识一般会给各关节加不同相位或用互不相关的多正弦信号来去相关，这里没有做。sim-to-sim 下不是问题，但上真机时模型必然失配，强相关激励会让参数更容易"互相补偿"出过拟合解。想去相关可以给每个关节错开相位：</p>
+  <pre style="margin-bottom:0"><code>phase_offset = torch.<span class="fn">linspace</span>(<span class="num">0</span>, <span class="num">2</span>*pi, <span class="fn">len</span>(joint_ids)+<span class="num">1</span>)[:-<span class="num">1</span>]
+chirp_signal = torch.<span class="fn">sin</span>(phase.<span class="fn">unsqueeze</span>(-<span class="num">1</span>) + phase_offset.<span class="fn">unsqueeze</span>(<span class="num">0</span>))  <span class="com"># (T, N)</span></code></pre>
+</div>
+
+<!-- ============================================ -->
+<h2 id="s4"><span class="n">4</span>科氏力与重力在哪里</h2>
+
+<p>整个仓库的 <code>.py</code> 与 <code>.md</code> 中，<code>gravity</code> / <code>coriolis</code> / <code>centrifugal</code> / <code>inertia</code> 的命中数是 <strong>0</strong>。这不是遗漏，是架构决定的 —— <strong>项目从头到尾没有写过动力学方程</strong>。</p>
+
+<p>完整刚体动力学由 PhysX 的 articulated-body 求解器从 USD 里的连杆质量、惯量张量、质心位置直接算出，每个物理步都在算科氏／离心项和重力矩，只是它们在 C++ 里，Python 侧看不到。重力确实是开着的（无任何地方覆盖 <code>SimulationCfg.gravity</code>），<code>fix_root_link=True</code> 只把 base 焊死，腿依然挂在重力场里摆。</p>
+
+<div class="eq">
+  <div class="line">
+    <span class="ubr">M(q)q̈ + C(q,q̇)q̇ + g(q)</span>
+    &nbsp;+&nbsp;
+    <span class="ubr2">A q̈ + D q̇ + F·sign(q̇)</span>
+    &nbsp;=&nbsp; τ(t − Δ)
+  </div>
+  <div class="cap">
+    <span class="sw" style="background:var(--accent)"></span>PhysX 从 USD 算，固定不变，不参与辨识
+    &nbsp;&nbsp;·&nbsp;&nbsp;
+    <span class="sw" style="background:var(--warn)"></span>待辨识（armature / viscous / Coulomb），全是对角项；外加编码器 bias 与延迟 Δ
+  </div>
+</div>
+
+<p>USD 里有几何和惯量，但<strong>没有</strong>减速器转子惯量、没有关节摩擦、没有编码器误差、没有通信延迟 —— 这 49 个参数补的正是这一块。它们只加在对角线和自身速度上，完全不碰 <code>C(q,q̇)</code>。</p>
+
+<div class="box warn">
+  <span class="label">一个真实存在的建模近似</span>
+  <p>armature 只加到 <code>M(q)</code> 的<strong>对角线</strong>。物理上真实的减速器转子除了贡献 <code>n²·I_rotor</code> 的对角惯量，还会产生<strong>陀螺／科氏耦合项</strong>（转子以 <code>n·q̇</code> 高速自转，与连杆角速度叉乘），这部分被忽略了。</p>
+  <p style="margin-bottom:0">这是所有主流仿真器的通行做法（MuJoCo 的 <code>armature</code>、PhysX 的 <code>jointArmature</code> 都是纯对角），在四足腿的转速和构型下误差很小，但它确实是模型类的固有上限。</p>
+</div>
+
+<div class="box danger">
+  <span class="label">实践上真正该担心的</span>
+  <p>既然 <code>M</code>、<code>C</code>、<code>g</code> 被当作<strong>已知且固定</strong>，USD 里连杆质量／惯量的误差就没有出口 —— 只能被 armature 和摩擦项吸收。</p>
+  <ul>
+    <li><strong>低频段</strong>（chirp 前几秒）由 <code>g(q)</code> 和静摩擦主导：连杆质量偏小 → 优化器抬高摩擦去补重力矩</li>
+    <li><strong>高频段</strong>（后几秒，KFE 幅值到 ±2 rad）由 <code>C</code> 和惯量主导：惯量偏差被 armature 吸收</li>
+  </ul>
+  <p style="margin-bottom:0">两者都会让你拿到一组"拟合很好但物理上错误"的参数，而且 score 照样降得下去，很难察觉。<strong>换机器人时，核对 URDF/USD 的连杆惯量比调 CMA-ES 的 bounds 重要得多。</strong>如果辨识出的 armature 跑到 bounds 边缘，多半不是摩擦大，是惯量错了。</p>
+</div>
+
+<!-- ============================================ -->
+<h2 id="s5"><span class="n">5</span>数据采集：仿真还是真机</h2>
+
+<p><strong>二选一，不需要都采。</strong>采集阶段只产出一个数据集。注意 <code>fit.py</code> 两种情况下<strong>都在仿真里跑</strong> —— 但那是<em>优化</em>阶段（并行复现轨迹），不是采集阶段。</p>
+
+<table>
+  <thead><tr><th></th><th>仿真采集</th><th>真机采集</th></tr></thead>
+  <tbody>
+    <tr><td><strong>脚本</strong></td><td><code>data_collection.py</code></td><td>自己的机器人日志系统</td></tr>
+    <tr><td><strong>有无 GT</strong></td><td>有（自己设的）</td><td>无</td></tr>
+    <tr><td><strong>目的</strong></td><td>验证算法／配置正确</td><td>拿到要部署的参数</td></tr>
+    <tr><td><strong>衡量标准</strong></td><td>辨识值 ≈ GT</td><td>score 低 + 未见轨迹上泛化</td></tr>
+  </tbody>
+</table>
+
+<h3>推荐顺序：先仿真一次，再上真机</h3>
+<p>不是说两份数据要互相对比（没意义，GT 是随手设的数），而是仿真那次充当<strong>管线自检</strong>：<code>joint_order</code> 与 sim 关节序的映射对不对、<code>bounds_params</code> 区间合不合理、CMA-ES 收不收敛、激励轨迹会不会撞关节限位。文档明确说 <code>data_collection.py</code> 的用途之一就是"在上真机前预演和验证轨迹"。</p>
+
+<h3>真机数据格式</h3>
+<p><code>fit.py</code> 只认一个 <code>.pt</code> 文件，三个键，<strong>都按 <code>joint_order</code> 排列</strong>：</p>
+<pre><code>{<span class="str">"time"</span>: (T,), <span class="str">"dof_pos"</span>: (T, N), <span class="str">"des_dof_pos"</span>: (T, N)}</code></pre>
+
+<div class="box danger">
+  <span class="label">三个容易踩的点</span>
+  <ol style="margin-bottom:0">
+    <li><strong>采样率必须等于 <code>sim.dt</code>。</strong> <code>decimation=1</code>，每个数据点走一个 <code>env.step()</code>，所以真机日志得是 400 Hz，或把 <code>sim.dt</code> 改成匹配真机控制周期。</li>
+    <li><strong><code>dof_pos</code> 存的是编码器读数，不是"真实"关节角。</strong> 真机上你本来就只有编码器读数，<strong>直接存原始值，不要做任何零位补偿</strong> —— 那个 bias 正是要辨识的 N 个参数之一。</li>
+    <li><strong>PD 增益必须和仿真一致。</strong> 真机跑 chirp 时的 P/D 增益要填回 <code>PaceDCMotorCfg</code>（ANYmal 是 85.0 / 0.6），否则辨识出的摩擦和 armature 全是错的。</li>
+  </ol>
+</div>
+
+<p>然后复制一份 <code>PaceCfg</code> 子类，把 <code>robot_name</code> 改成如 <code>"xxx_real"</code>、<code>data_dir</code> 指向你的文件即可。</p>
+
+<div class="box warn">
+  <span class="label">提醒</span>
+  <p style="margin-bottom:0"><code>docs/real-world.md</code> 是<strong>空文件</strong>（0 字节），不是 "coming soon"。真机侧数据采集没有官方指导，上述约定是从 <code>data_collection.py</code> 与 <code>fit.py</code> 的代码反推的。第一次用真机数据前，建议先在 <code>plot_trajectory.py</code> 里画一下，确认时间轴、关节顺序、单位（弧度）都对得上。</p>
+</div>
+
+<!-- ============================================ -->
+<h2 id="s6"><span class="n">6</span>模型文件的来源</h2>
+
+<p>仓库里<strong>一个机器人模型文件都没有</strong> —— URDF、USD、MJCF、STL/OBJ 网格全无。模型来自 Isaac Lab 自带资产包：<code>from isaaclab_assets.robots.anymal import ANYMAL_D_CFG</code>，指向 NVIDIA Nucleus 服务器上的 USD，首次运行时联网下载并缓存。</p>
+
+<p>这是刻意的 —— <code>.gitignore</code> 里有显式规则 <code>**/*.usd</code> 等（注释写着 "No USD files allowed in the repo"），<code>**/data/*</code> 也被忽略，所以 <code>data/</code> 目录初始不存在。</p>
+
+<div class="box info">
+  <span class="label">换自己的机器人</span>
+  <p style="margin-bottom:0">不需要往仓库里塞 URDF。标准做法：先用 Isaac Lab 的 URDF→USD 转换器把 URDF 转成 USD 放在仓库外，再写一个 <code>ArticulationCfg(spawn=sim_utils.UsdFileCfg(usd_path="..."))</code> 替换掉 <code>ANYMAL_D_CFG</code>。注意 <strong>URDF 里的 <code>&lt;dynamics damping friction&gt;</code> 字段在 Isaac 里基本不生效</strong>，本项目所有待辨识参数都是运行时通过 <code>write_joint_*_to_sim()</code> 写进 PhysX 的，所以模型文件里只需要<strong>正确的连杆质量／惯量／几何</strong>。</p>
+</div>
+
+<!-- ============================================ -->
+<h2 id="s7"><span class="n">7</span>人形适配 · 必改项</h2>
+
+<h3>7.1 新建 <code>&lt;robot&gt;_pace_env_cfg.py</code></h3>
+<p>照抄 <code>anymal_pace_env_cfg.py</code>，四处要改：</p>
+<table>
+  <thead><tr><th>项</th><th>ANYmal</th><th>人形</th></tr></thead>
+  <tbody>
+    <tr><td><code>ArticulationCfg</code></td><td><code>ANYMAL_D_CFG</code></td><td>自己的 <code>UsdFileCfg(usd_path=...)</code></td></tr>
+    <tr><td><code>joint_order</code></td><td>12 个名字</td><td>N 个名字，<strong>必须和真机日志列序一致</strong></td></tr>
+    <tr><td><code>bounds_params</code></td><td><code>zeros((49,2))</code></td><td><code>zeros((4*N+1, 2))</code></td></tr>
+    <tr><td><code>init_state.pos</code></td><td><code>(0,0,1.0)</code></td><td>抬高到脚离地（见 9.1）</td></tr>
+  </tbody>
+</table>
+
+<p><code>bounds_params</code> 的切片全都要跟着 N 走：</p>
+<pre><code>N = <span class="fn">len</span>(joint_order)
+<span class="kw">self</span>.bounds_params[<span class="num">0</span>*N:<span class="num">1</span>*N, <span class="num">0</span>] = <span class="num">1e-5</span>      <span class="com"># armature 下界</span>
+<span class="kw">self</span>.bounds_params[<span class="num">0</span>*N:<span class="num">1</span>*N, <span class="num">1</span>] = ...        <span class="com"># armature 上界</span>
+<span class="kw">self</span>.bounds_params[<span class="num">1</span>*N:<span class="num">2</span>*N, <span class="num">1</span>] = ...        <span class="com"># viscous</span>
+<span class="kw">self</span>.bounds_params[<span class="num">2</span>*N:<span class="num">3</span>*N, <span class="num">1</span>] = ...        <span class="com"># coulomb</span>
+<span class="kw">self</span>.bounds_params[<span class="num">3</span>*N:<span class="num">4</span>*N, <span class="num">0</span>] = -<span class="num">0.1</span>
+<span class="kw">self</span>.bounds_params[<span class="num">3</span>*N:<span class="num">4</span>*N, <span class="num">1</span>] =  <span class="num">0.1</span>       <span class="com"># bias</span>
+<span class="kw">self</span>.bounds_params[<span class="num">4</span>*N,    <span class="num">1</span>] = <span class="num">10.0</span>       <span class="com"># delay，必须 ≤ max_delay</span></code></pre>
+
+<div class="box danger">
+  <span class="label">硬约束</span>
+  <p style="margin-bottom:0"><code>delay</code> 上界超过 <code>PaceDCMotorCfg.max_delay</code>，<code>DelayBuffer</code> 会越界。</p>
+</div>
+
+<h3>7.2 注册环境</h3>
+<p>在 <code>tasks/manager_based/__init__.py</code> 加一个 <code>gym.register</code>，然后跑脚本时带 <code>--task Isaac-Pace-&lt;YourRobot&gt;-v0</code> —— 两个脚本的 <code>--task</code> 默认值都写死了 ANYmal。</p>
+
+<h3>7.3 重写激励轨迹</h3>
+<p><code>data_collection.py:105-117</code> 的 <code>[0.0, 0.4, 0.8] * 4</code> 和 <code>[0.25, 0.5, -2.0] * 4</code>，那个 <code>*4</code> 是四条腿的对称性。人形没有这种结构，得逐关节给长度为 N 的数组：</p>
+<pre><code>trajectory_bias       = torch.<span class="fn">tensor</span>([...], device=...)   <span class="com"># 长度 N</span>
+trajectory_scale      = torch.<span class="fn">tensor</span>([...], device=...)   <span class="com"># 长度 N</span>
+trajectory_directions = torch.<span class="fn">ones</span>(N, device=...)        <span class="com"># 左右镜像按需给 -1</span></code></pre>
+<p>幅值要<strong>逐关节核对关节限位</strong>。KFE 用 <code>scale=-2.0</code> 是因为膝关节行程大；人形的踝／腕限位窄得多，超限会被 PhysX 截断，引入模型里没有的非线性，辨识直接跑偏。</p>
+
+<!-- ============================================ -->
+<h2 id="s8"><span class="n">8</span>人形适配 · 三个静默出错的坑</h2>
+
+<p>以下三点在 12 关节四足下恰好成立，换人形会<strong>静默出错</strong> —— 不报错、不崩溃，只是给你一组错参数。</p>
+
+<h3>坑 1 · 每个驱动器组都必须是 <code>PaceDCMotor</code></h3>
+<p><code>optim/cma_es.py:132-133</code> 无条件遍历<strong>所有</strong>驱动器组：</p>
+<pre><code><span class="kw">for</span> drive_type <span class="kw">in</span> articulation.actuators.<span class="fn">keys</span>():
+    ...
+    articulation.actuators[drive_type].<span class="fn">update_encoder_bias</span>(...)
+    articulation.actuators[drive_type].<span class="fn">update_time_lags</span>(...)</code></pre>
+<p>人形常见做法是腿用一种驱动器、手臂／腰用另一种。只要给手臂配了普通 <code>ImplicitActuatorCfg</code>，这里直接 <code>AttributeError</code>。</p>
+<div class="box ok">
+  <span class="label">对策</span>
+  <p style="margin-bottom:0">所有关节都用 <code>PaceDCMotorCfg</code>，不辨识的组把 <code>max_delay=0</code> 即可。<code>data_collection.py:76-86</code> 同理。</p>
+</div>
+
+<h3>坑 2 · <code>joint_order</code> 不覆盖全部关节时，索引映射会错</h3>
+<p>最隐蔽的一个。<code>optim/cma_es.py:127-131</code>：</p>
+<pre><code><span class="kw">if</span> <span class="fn">isinstance</span>(drive_indices, <span class="fn">slice</span>):
+    all_idx = torch.<span class="fn">arange</span>(joint_ids.shape[<span class="num">0</span>], ...)   <span class="com"># ← N，不是机器人总关节数</span>
+    drive_indices = all_idx[drive_indices]
+comparison_matrix = (joint_ids.<span class="fn">unsqueeze</span>(<span class="num">1</span>) == drive_indices.<span class="fn">unsqueeze</span>(<span class="num">0</span>))
+drive_joint_idx = torch.<span class="fn">argmax</span>(comparison_matrix.<span class="fn">int</span>(), dim=<span class="num">0</span>)</code></pre>
+<p>两个问题：</p>
+<ul>
+  <li><code>joint_ids.shape[0]</code> 用的是 <code>len(joint_order)</code>。当驱动器组覆盖全部关节时 <code>joint_indices</code> 是 <code>slice(None)</code>，于是得到 <code>arange(N)</code>。<strong>只有 N == 机器人总关节数时才对。</strong> ANYmal 恰好 12 == 12，所以从未暴露。人形 29 DOF 但只辨识 12 个腿关节的话，这里直接错位。</li>
+  <li><code>argmax</code> 在某列全 False 时<strong>返回 0</strong>，不报错。某个关节属于驱动器组但不在 <code>joint_order</code> 里，会被悄悄分配成 <code>joint_order[0]</code> 的 bias。</li>
+</ul>
+<div class="box ok">
+  <span class="label">对策</span>
+  <p style="margin-bottom:0">最稳的规避方式是<strong>让 <code>joint_order</code> 覆盖机器人全部关节</strong>，不想辨识的关节把 bounds 上下界设成同一个值锁死。想只辨识子集的话，这段映射逻辑得自己重写。</p>
+</div>
+
+<h3>坑 3 · GT bias 设成非均匀值时，采集脚本的序号会露馅</h3>
+<p><code>data_collection.py</code> 里 <code>trajectory</code> 是 <strong>sim 关节序</strong>，<code>dof_pos_buffer</code> 是 <strong><code>joint_order</code> 序</strong>，中间第 117、119、131 行对 <code>bias</code> 的索引方式并不一致。现在看不出问题，<strong>因为 <code>bias = [0.05]*12</code> 是均匀的，怎么排都一样</strong>。</p>
+<p>要做 sim 验证、给每个关节设不同 GT bias 时，这几行必须逐行核对。否则你会看到"score 收敛得很好但 bias 辨识值对不上 GT"，然后怀疑算法 —— 其实是采集脚本的序号错了。</p>
+<div class="box warn">
+  <span class="label">顺带</span>
+  <p style="margin-bottom:0"><code>data_collection.py:104</code> 的 <code>trajectory[:, :] = chirp_signal</code> 填满<strong>所有</strong>列，而第 117 行只重写 <code>trajectory[:, joint_ids]</code>。若 <code>joint_order</code> 不覆盖全部关节，剩余关节会收到<strong>原始 ±1 rad 的裸 chirp 指令</strong> —— 手臂乱甩。另外第 63 行 <code>bias = [0.05] * 12</code> 也是写死的 12。</p>
+</div>
+
+<!-- ============================================ -->
+<h2 id="s9"><span class="n">9</span>人形适配 · 物理层面问题</h2>
+
+<h3>9.1 脚不能碰地</h3>
+
+<p><strong>ANYmal 本身没有这个问题</strong> —— 风险在于照抄配置。<code>fix_root_link=True</code> 只把 base 焊死在 <code>init_state.pos</code>，腿仍自由摆，而场景里有一块 <code>/World/ground</code> 地面。</p>
+
+<table>
+  <thead><tr><th></th><th>base 高度</th><th>腿完全伸直</th><th>脚最低点</th><th>余量</th></tr></thead>
+  <tbody>
+    <tr><td>ANYmal D</td><td class="num-col">1.0 m</td><td class="num-col">≈ 0.6 m</td><td class="num-col">≈ 0.4 m</td><td class="num-col" style="color:var(--ok)">充裕</td></tr>
+    <tr><td>人形（H1 级，照抄 1.0）</td><td class="num-col">1.0 m</td><td class="num-col">0.8 – 0.9 m</td><td class="num-col">0.1 – 0.2 m</td><td class="num-col" style="color:var(--danger)">会蹭到</td></tr>
+  </tbody>
+</table>
+
+<p>而且 ANYmal 的 chirp 极值方向恰好是安全的：KFE 目标范围 <code>[-3.6, 0.4]</code>，绝大部分时间膝关节是<strong>屈</strong>的、腿蜷着，脚离地更远；只在 <code>chirp = -1</code> 那一瞬（HFE ≈ -0.3，KFE ≈ 0.4）才接近伸直。人形没有这种富余。</p>
+
+<div class="box danger">
+  <span class="label">真正难查的失败模式：接触与候选参数相关</span>
+  <p>4096 个环境跑同一条目标轨迹，但各自的 armature / 摩擦不同，<strong>实际跟踪出的幅值就不同</strong> —— 摩擦小、阻尼小的那些环境摆幅更大，更容易碰到地面。于是：</p>
+  <ul>
+    <li>碰地的那批环境残差突然变大（接触力混进残差，而模型里根本没有接触项）</li>
+    <li>CMA-ES 把这当成"这组参数不好"</li>
+    <li>协方差往<strong>远离低摩擦区域</strong>的方向收缩 → 系统性地把摩擦估高</li>
+  </ul>
+  <p style="margin-bottom:0">score 曲线看着完全正常，你不会意识到是地面在捣乱。</p>
+</div>
+
+<h4>对策</h4>
+<p>这个任务里地面<strong>没有任何作用</strong>（机器人悬挂、不需要接触），留着只有风险。最干净的做法是直接删掉：</p>
+<pre><code><span class="com"># pace_sim2real_env_cfg.py，注释掉整个 ground</span>
+<span class="com"># ground = AssetBaseCfg(prim_path="/World/ground", spawn=sim_utils.GroundPlaneCfg(...))</span></code></pre>
+<p>想保留视觉参考的话，就抬高到腿完全伸直还有 0.3 m 以上余量，并加一句断言兜底：</p>
+<pre><code><span class="kw">assert</span> init_z - max_leg_reach &gt; <span class="num">0.3</span>, <span class="str">"脚离地面太近"</span></code></pre>
+
+<div class="box warn">
+  <span class="label">数值来源</span>
+  <p style="margin-bottom:0">ANYmal 的连杆尺寸按公开规格估算，仓库里没有 USD 无法实测。数量级足以说明问题，精确值请自行在 Isaac Sim 中测量。</p>
+</div>
+
+<h3>9.2 armature 边界要逐关节给</h3>
+<p>armature ≈ <code>n²·I_rotor</code>，人形不同部位减速比差异极大 —— 谐波减速 n≈100 的髋关节可能到 0.2 kg·m²，准直驱 n≈6 的关节只有 1e-3，相差两个数量级。全部用 <code>[1e-5, 1.0]</code> 要么太宽拖慢收敛，要么把真值挡在外面。按关节分组设。</p>
+
+<h3>9.3 损失是跨关节直接求和的</h3>
+<p><code>cma_es.py:73</code> 的 <code>torch.sum(..., dim=1)</code> 没有归一化。ANYmal 三类关节幅值量级相近所以无所谓；人形髋关节摆 ±1 rad、腕关节 ±0.1 rad，<strong>大关节会完全主导优化，小关节参数基本没被约束</strong>。建议按各关节轨迹 RMS 做权重归一化。</p>
+
+<h3>9.4 显存</h3>
+<p><code>sim_dof_pos_buffer</code> 是 <code>(pop, T, N)</code>：<code>4096 × 8000 × 29 × 4B ≈ 3.8 GB</code>，还不算 4096 个 29-DOF articulation 本身（比 12-DOF 重得多）。大概率 OOM。</p>
+<table>
+  <thead><tr><th>population</th><th>用途</th></tr></thead>
+  <tbody>
+    <tr><td class="num-col">256 – 512</td><td>快速原型（人形建议从这里起步）</td></tr>
+    <tr><td class="num-col">512 – 2048</td><td>标准辨识</td></tr>
+    <tr><td class="num-col">2048 – 4096+</td><td>高保真／发表级结果</td></tr>
+  </tbody>
+</table>
+<p>也可以缩短 <code>--duration</code>。注意运行时不随 population 线性增长（并行仿真），但显存是线性的。</p>
+
+<h3>9.5 并联踝与闭链</h3>
+<p>很多人形有平行四边形踝或五连杆。PhysX articulation 只支持树结构，URDF 转 USD 时这些会被断开成串联近似。这种情况下辨识出的"关节摩擦"实际混进了连杆机构的等效摩擦，<strong>数值不再有物理意义</strong>（但作为仿真拟合参数仍然可用）。提前知道这点，别拿辨识结果去反推电机手册参数。</p>
+
+<h3>9.6 真机 chirp 的安全性</h3>
+<p>人形悬挂起来做全关节同步 0.1→10 Hz 扫频，10 Hz 段的加速度不小。建议先在仿真里跑一遍确认力矩峰值不超 <code>effort_limit</code>，上真机时从<strong>低幅值、窄频段</strong>（如 0.1→3 Hz）开始。</p>
+
+<!-- ============================================ -->
+<h2 id="s10"><span class="n">10</span>推进顺序 Checklist</h2>
+
+<h4>阶段一 · 仿真跑通</h4>
+<ul class="chk">
+  <li>新建 <code>&lt;robot&gt;_pace_env_cfg.py</code>，改 <code>ArticulationCfg</code> / <code>joint_order</code> / <code>bounds_params</code> / <code>init_state.pos</code></li>
+  <li>所有关节统一用 <code>PaceDCMotorCfg</code>（坑 1）</li>
+  <li><code>joint_order</code> 覆盖全部关节（坑 2）</li>
+  <li>在 <code>manager_based/__init__.py</code> 注册新 task id</li>
+  <li>重写 <code>data_collection.py</code> 的 <code>trajectory_bias</code> / <code>scale</code> / <code>directions</code> 为长度 N 数组</li>
+  <li>删掉 ground plane，或抬高 <code>init_state.pos</code> 的 z 留足 0.3 m 余量（§9.1）</li>
+  <li>核对 URDF/USD 的连杆质量与惯量张量（§4 最重要的一条）</li>
+  <li>跑 <code>data_collection.py</code>，肉眼确认：轨迹合理、无限位截断、脚不碰地、力矩不超限</li>
+</ul>
+
+<h4>阶段二 · GT 自检</h4>
+<ul class="chk">
+  <li>设一组<strong>逐关节不同</strong>的 GT（顺便验证坑 3）</li>
+  <li>确认所有 GT 都落在 <code>bounds_params</code> 区间内</li>
+  <li>跑 <code>fit.py</code>（population 先用 512），确认参数能回到 GT 附近</li>
+  <li><code>plot_trajectory.py</code> 对比辨识值与 GT，逐类打印检查</li>
+</ul>
+
+<h4>阶段三 · 真机</h4>
+<ul class="chk">
+  <li>真机 PD 增益填回 <code>PaceDCMotorCfg</code>（<code>stiffness</code> / <code>damping</code>）</li>
+  <li>低幅值窄频段先试，逐步放开到目标频段</li>
+  <li>日志采样率对齐 <code>sim.dt</code>，<code>dof_pos</code> 存<strong>原始编码器读数</strong></li>
+  <li>采<strong>多条</strong>轨迹（不同频段／幅值／PD 增益），一条辨识、其余留出验证</li>
+  <li>检查 score &lt; 0.005；检查辨识值是否顶在 bounds 边缘（多半是惯量错了）</li>
+  <li>部署前在学习环境里重放真机数据做最终 sanity check</li>
+</ul>
+
+<div class="box info" style="margin-top:32px">
+  <span class="label">一句话总结</span>
+  <p style="margin-bottom:0">真机上 GT 不存在（只有模型失配下的"最优近似"），所以先在仿真里造一个 GT 把整条 pipeline 验证通，再换真机数据。适配人形的主要工作量不在"改配置"，而在<strong>处理那三个为 12-DOF 四足写死的索引假设</strong>，以及<strong>确保 USD 惯量正确</strong> —— 后者是整个方法的隐含前提。</p>
+</div>
+
+<footer>
+  基于 <code>pace-sim2real</code> 源码走读整理 · 代码行号对应仓库快照，升级后请重新核对<br>
+  参考：<code>docs/examples/anymal.md</code>、<code>docs/tutorials/basics.md</code>、<code>docs/tutorials/best_practice.md</code>
+</footer>
+
+</div>
+</body>
+</html>

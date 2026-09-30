@@ -93,6 +93,13 @@ class CMAESOptimizerCfg:
     sigma: float = 0.5
     save_interval: int = 25
     save_optimization_process: bool = False  # consume more disk space if True, saves optimization process after finishing
+    # 分段损失诊断的频段边界 [Hz]。只写 TB（5_BandLoss/*），不参与 CMA-ES 的 tell()。
+    # ⚠️ 首尾必须等于 data_collection.py 的 --min_frequency / --max_frequency。
+    # 设为空 tuple 关闭。段数 = len - 1。
+    segment_edges_hz: tuple = (0.1, 0.2, 0.4, 0.8, 1.2, 1.6, 2.0, 2.8, 4.0)
+    # 扫频方式，必须和 data_collection.py 一致："linear" | "log"。
+    # 它决定「时间步 ↔ 瞬时频率」的映射，搞错只会让 TB 的频段标签错位，不会报错。
+    sweep_kind: str = "linear"
 
 @configclass
 class PaceCfg:

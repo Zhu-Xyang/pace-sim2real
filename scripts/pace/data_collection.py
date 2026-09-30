@@ -16,7 +16,7 @@ parser.add_argument("--num_envs", type=int, default=1, help="Number of environme
 # parser.add_argument("--task", type=str, default="Isaac-Pace-Anymal-D-v0", help="Name of the task.")
 parser.add_argument("--task", type=str, default="Isaac-Pace-S800-v0", help="Name of the task.")
 parser.add_argument("--min_frequency", type=float, default=0.1, help="Minimum frequency for the chirp signal in Hz.")
-parser.add_argument("--max_frequency", type=float, default=2.0, help="Maximum frequency for the chirp signal in Hz. Ignored per-joint when --grouped-sweep is on (the default); used as the uniform fallback otherwise.")
+parser.add_argument("--max_frequency", type=float, default=4.0, help="Maximum frequency for the chirp signal in Hz. Ignored per-joint when --grouped-sweep is on (the default); used as the uniform fallback otherwise. ⚠️ 改这里必须同步改 pace_sim2real_env_cfg.py 的 segment_edges_hz（首尾须一致）。")
 parser.add_argument("--grouped_sweep", action=argparse.BooleanOptionalAction, default=False, help="EXPERIMENTAL, off by default. Gives each joint its own sweep ceiling (3 Hz slow / 6 Hz fast) plus a per-joint phase offset. Measured to be WORSE than the uniform sweep: fast joints mistrack and the out-of-phase legs collide with each other. Enable with --grouped-sweep only if you also make L/R symmetric joints share a phase.")
 parser.add_argument("--duration", type=float, default=20.0, help="Duration of the chirp signal in seconds.")
 # append AppLauncher cli args

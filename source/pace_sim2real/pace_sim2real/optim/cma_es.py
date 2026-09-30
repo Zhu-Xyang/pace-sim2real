@@ -5,13 +5,14 @@
 from __future__ import annotations
 
 import cmaes
+import math
 import torch
 from torch.utils.tensorboard import SummaryWriter as TensorboardSummaryWriter
 from datetime import datetime
 import os
 
 class CMAESOptimizer:
-    def __init__(self, bounds, population_size, log_dir, joint_order, max_iteration, data, device, epsilon=None, sigma=0.5, save_interval=10, save_optimization_process=False):
+    def __init__(self, bounds, population_size, log_dir, joint_order, max_iteration, data, device, epsilon=None, sigma=0.5, save_interval=10, save_optimization_process=False, segment_edges_hz=(0.1, 4.0), sweep_kind="linear"):
 
         self.joint_order = joint_order
         self.max_iteration = max_iteration
@@ -61,6 +62,34 @@ class CMAESOptimizer:
         self.bias_idx = slice(3 * num_joints, 4 * num_joints)
         self.delay_idx = 4 * num_joints
 
+        # --- 分段损失诊断：只写 TB，不改变 CMA-ES 看到的目标 -------------------
+        # 线性 chirp 的瞬时频率是已知的：f(t) = f0 + (f1-f0)·t/T，所以按时间切段
+        # 等价于按频率切段。用途是看残差落在哪个频段，从而判断哪个参数没被约束住：
+        #   armature 效应 ∝ ω²     → 住高频
+        #   friction  τf·sign(q̇)   → 与 ω 无关，相对惯性项在低频占比最大
+        # 26_09_29 那轮的实测：1.6-2.0Hz 一段占损失的 74%，0.1-0.8Hz 三档合计仅 5%
+        # —— 正好对应 friction 误差 7.7% 远大于 armature 误差 1.2%。
+        # ⚠️ 首尾边界必须等于 data_collection.py 的 --min_frequency/--max_frequency，
+        #    否则「段号 → 频率」的映射是错的。
+        self.seg_edges_hz = tuple(segment_edges_hz)
+        _n = data["dof_pos"].shape[0]
+        # 先查长度再取下标：空 tuple / 单元素都用来关闭诊断
+        if len(self.seg_edges_hz) >= 2 and self.seg_edges_hz[-1] > self.seg_edges_hz[0]:
+            _f_lo, _f_hi = self.seg_edges_hz[0], self.seg_edges_hz[-1]
+            # 「时间步 ↔ 瞬时频率」的映射取决于扫频方式，必须和 data_collection.py 一致，
+            # 否则段号对应的频段是错的（不报错，只是标签错）。
+            if sweep_kind == "log":
+                # 对数扫频: f(t) = f0·(f1/f0)^(t/T)  →  t/T = ln(f/f0)/ln(f1/f0)
+                _at = lambda f: _n * math.log(f / _f_lo) / math.log(_f_hi / _f_lo)
+            else:
+                # 线性扫频: f(t) = f0 + (f1-f0)·t/T
+                _at = lambda f: _n * (f - _f_lo) / (_f_hi - _f_lo)
+            self.seg_edges = [min(_n, max(0, int(round(_at(f))))) for f in self.seg_edges_hz]
+            self.seg_scores = torch.zeros((population_size, len(self.seg_edges_hz) - 1), device=device)
+        else:
+            self.seg_edges = None
+            self.seg_scores = None
+
         self._reset_population()
         print("CMA-ES optimizer initialized.")
         print("Current iteration: ", self.iteration_counter)
@@ -69,9 +98,21 @@ class CMAESOptimizer:
         return self.optimizer.ask()
 
     def tell(self, sim_dof_pos, real_dof_pos):
-        self.scores += torch.sum(torch.square(sim_dof_pos - real_dof_pos - self.sim_params[:, self.bias_idx]), dim=1)
+        err_sq = torch.sum(torch.square(sim_dof_pos - real_dof_pos - self.sim_params[:, self.bias_idx]), dim=1)
+        self.scores += err_sq
+        # 同步累加分段损失。纯诊断 —— CMA-ES 只看到上面的 self.scores。
+        if self.seg_scores is not None:
+            self.seg_scores[:, self._seg_of(self.scores_counter)] += err_sq
         self.sim_dof_pos_buffer[:, self.scores_counter, :] = sim_dof_pos
         self.scores_counter += 1
+
+    def _seg_of(self, step):
+        """时间步 → chirp 频段号。线性 chirp 下时间步与瞬时频率一一对应。"""
+        seg = 0
+        for i, edge in enumerate(self.seg_edges):
+            if step >= edge:
+                seg = i
+        return min(seg, self.seg_scores.shape[1] - 1)
 
     def evolve(self):
         self.scores /= self.scores_counter
@@ -90,6 +131,8 @@ class CMAESOptimizer:
 
         self.scores = torch.zeros_like(self.scores)
         self.scores_counter = 0
+        if self.seg_scores is not None:
+            self.seg_scores.zero_()
         self.iteration_counter += 1
         print("CMA-ES optimizer iteration: ", self.iteration_counter)
 
@@ -180,6 +223,22 @@ class CMAESOptimizer:
         self.writer.add_scalar("0_Episode/score", min_score.item(), self.iteration_counter)
         self.writer.add_scalar("0_Episode/max_score", max_score.item(), self.iteration_counter)
         self.writer.add_scalar("0_Episode/diff_score", (max_score - min_score) / min_score, self.iteration_counter)
+
+        # 分段损失：残差的频段分布。mean_* 与 0_Episode/score 同尺度；
+        # share_* 是该段占总损失的份额（若干份额之和恒为 1），份额最高的那段
+        # 就是优化器真正在优化的频段 —— 哪个参数没被约束住，看它住在哪一段。
+        if self.seg_scores is not None:
+            n_steps = torch.tensor(
+                [max(1, self.seg_edges[s + 1] - self.seg_edges[s]) for s in range(self.seg_scores.shape[1])],
+                device=self.device,
+                dtype=torch.float32,
+            )
+            band_mean = self.seg_scores / n_steps
+            band_share = self.seg_scores / self.seg_scores.sum(dim=1, keepdim=True).clamp_min(1e-12)
+            for s in range(self.seg_scores.shape[1]):
+                tag = f"{self.seg_edges_hz[s]:.1f}-{self.seg_edges_hz[s + 1]:.1f}Hz"
+                self.writer.add_scalar("5_BandLoss/mean_" + tag, band_mean[:, s].mean().item(), self.iteration_counter)
+                self.writer.add_scalar("5_BandLoss/share_" + tag, band_share[:, s].mean().item(), self.iteration_counter)
 
     def save_checkpoint(self, mean, iteration, finished=False):
         min_index = torch.argmin(self.scores_buffer[iteration, :])
