@@ -319,7 +319,7 @@ def main():
         "des_dof_pos": dof_target_pos_buffer.cpu(),
         "dof_vel": dof_vel_buffer.cpu(),
         "dof_torque": dof_torque_buffer.cpu(),
-    }, data_dir / "chirp_data_new.pt")
+    }, data_dir / "chirp_data.pt")
 
     import matplotlib.pyplot as plt
 
