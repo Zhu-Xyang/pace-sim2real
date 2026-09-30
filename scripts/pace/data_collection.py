@@ -211,23 +211,40 @@ def main():
     # ==============================
 
     # ===========s800==============
+    # ── directions：把激励整形成镜像对称（左半为基准，右半取符号）───────────
+    # 判据（矢状面反射 M = diag(1,-1,1)，a = 关节在 q=0 时的世界系轴）：
+    #     a_R == +M·a_L  →  dir_R = -1   （轴落在镜面内：roll / yaw）
+    #     a_R == -M·a_L  →  dir_R = +1   （轴沿镜面法向：pure pitch）
+    # 依据：反射是反向的，绕 a_L 转 θ 镜像成绕 M·a_L 转 -θ。
+    #
+    # ⚠️ 不要用「两个轴向量是否相同」当判据 —— 那只在轴落在镜面内时成立。
+    #    纯 pitch 轴如 (0,1,0) 满足 M·a_L = -a_L，两向量「看起来一样」，
+    #    但它恰恰是需要 +1 的镜像情形（左右膝应同向弯曲）。
+    #    这五处曾按错误判据写成反向：KNEE_PITCH / ANKLE_PITCH / SHOULDER_YAW /
+    #    ELBOW_YAW / WRIST_ROLL（已修正）。
+    # 校验: python scripts/check_mirror_symmetry.py   （退出码 0 = 全部通过）
     trajectory_directions = torch.tensor(
-        [  1,  1,  1,  1,  1,  1,      # 左腿 (轴相同 → dir=+1)
-        1, -1, -1, -1, -1, -1,     # 右腿 (HIP_PITCH轴镜像→dir=+1, 其余→dir=-1)
+        [  1,  1,  1,  1,  1,  1,      # 左腿（基准，全部 +1）
+        1, -1, -1,  1,  1, -1,     # 右腿: HIP_P, HIP_R, HIP_Y, KNEE, ANK_P, ANK_R
         1,                          # 腰
-        1,  1,  1,  1,  1,  1,  1, # 左臂
-        1, -1,  1,  1,  1,  1,  1   # 右臂 (SHOULDER_PITCH/YAW, ELBOW×2, WRIST×2 轴镜像→dir=+1)
+        1,  1,  1,  1,  1,  1,  1, # 左臂（基准，全部 +1）
+        1, -1, -1,  1, -1,  1, -1  # 右臂: SH_P, SH_R, SH_Y, ELB_P, ELB_Y, WR_P, WR_R
         ],
         device=env.unwrapped.device
     )
 
     # bias: 0 for symmetric joints, URDF center for asymmetric (knee/ankle_roll/shldr_roll/elbow_pitch/wrist_roll)
+    # bias 与 direction 必须配套：镜像激励要求 q_R(t) = σ·q_L(t)，σ = ∓1 由上面的
+    # directions 承载。所以 bias 和 scale 左右必须「相等」。
+    # ⚠️ 右腿 KNEE 的 bias 曾写成 -1.046（想用 bias 反号去补 directions 写反的 dir），
+    #    那是错的：bias 反号 + dir 反号 得到的是「反相」，不是镜像。
+    #    现在 directions 已按正确判据修正，bias 恢复成与左腿相等。
     trajectory_bias = torch.tensor(
         [0.000, 0.150, 0.000, 1.046, 0.000, -0.087,  # 左腿
-        0.000, 0.150, 0.000, -1.046, 0.000, -0.087,  # 右腿 (与左腿相同!)
+        0.000, 0.150, 0.000, 1.046, 0.000, -0.087,  # 右腿（与左腿相等）
         0.000,                                        # 腰
         0.000, 1.052, 0.000, -1.004, 0.000, 0.000, -0.131,  # 左臂
-        0.000, 1.052, 0.000, -1.004, 0.000, 0.000, -0.131], # 右臂 (与左臂相同!)
+        0.000, 1.052, 0.000, -1.004, 0.000, 0.000, -0.131], # 右臂（与左臂相等）
         device=env.unwrapped.device
     )
 
@@ -302,7 +319,7 @@ def main():
         "des_dof_pos": dof_target_pos_buffer.cpu(),
         "dof_vel": dof_vel_buffer.cpu(),
         "dof_torque": dof_torque_buffer.cpu(),
-    }, data_dir / "chirp_data.pt")
+    }, data_dir / "chirp_data_new.pt")
 
     import matplotlib.pyplot as plt
 
