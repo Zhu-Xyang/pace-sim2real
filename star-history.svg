@@ -1,0 +1,37 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="600" viewBox="0 0 1200 600" role="img" aria-labelledby="title description">
+  <title id="title">Zhu-Xyang/pace-sim2real star history</title>
+  <desc id="description">Cumulative GitHub stars over time. Current total: 0.</desc>
+  <style>
+    text { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+    .background { fill: #ffffff; }
+    .title { fill: #24292f; font-size: 31px; font-weight: 700; }
+    .subtitle { fill: #57606a; font-size: 18px; }
+    .grid { stroke: #d8dee4; stroke-width: 1; opacity: .72; }
+    .grid.vertical { opacity: .34; }
+    .tick { fill: #57606a; font-size: 14px; }
+    .ytick { text-anchor: end; }
+    .xtick { text-anchor: middle; }
+    .area { fill: url(#area-gradient); }
+    .history-line { fill: none; stroke: #0969da; stroke-width: 4; stroke-linecap: round; stroke-linejoin: round; }
+    .endpoint { fill: #ffffff; stroke: #0969da; stroke-width: 4; }
+    .badge { fill: #f6f8fa; stroke: #d0d7de; }
+    .badge-text { fill: #24292f; font-size: 18px; font-weight: 650; text-anchor: middle; }
+  </style>
+  <defs>
+    <linearGradient id="area-gradient" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#54aeff" stop-opacity="0.40" />
+      <stop offset="100%" stop-color="#ddf4ff" stop-opacity="0.04" />
+    </linearGradient>
+  </defs>
+  <rect class="background" width="1200" height="600" rx="18" />
+  <text class="title" x="88" y="49">★ Zhu-Xyang/pace-sim2real</text>
+  <text class="subtitle" x="88" y="80">Cumulative GitHub star history</text>
+  <rect class="badge" x="996" y="31" width="162" height="46" rx="23" />
+  <text class="badge-text" x="1077" y="61">★ 0</text>
+  <line class="grid" x1="88" y1="504.00" x2="1158" y2="504.00" /><text class="tick ytick" x="70" y="509.00">0</text><line class="grid" x1="88" y1="504.00" x2="1158" y2="504.00" /><text class="tick ytick" x="70" y="509.00">0</text><line class="grid" x1="88" y1="504.00" x2="1158" y2="504.00" /><text class="tick ytick" x="70" y="509.00">0</text><line class="grid" x1="88" y1="112.00" x2="1158" y2="112.00" /><text class="tick ytick" x="70" y="117.00">1</text><line class="grid" x1="88" y1="112.00" x2="1158" y2="112.00" /><text class="tick ytick" x="70" y="117.00">1</text><line class="grid" x1="88" y1="112.00" x2="1158" y2="112.00" /><text class="tick ytick" x="70" y="117.00">1</text>
+  <line class="grid vertical" x1="88.00" y1="112" x2="88.00" y2="504" /><text class="tick xtick" x="88.00" y="542">05 Oct</text><line class="grid vertical" x1="1158.00" y1="112" x2="1158.00" y2="504" /><text class="tick xtick" x="1158.00" y="542">06 Oct</text>
+  <path class="area" d="M 88.00 504.00 L 88.00 504.00 L 88.00 504.00 Z" />
+  <polyline class="history-line" points="88.00,504.00" />
+  <circle class="endpoint" cx="88.00" cy="504.00" r="7" />
+  <text class="subtitle" x="88" y="578">0 stars · through 05 Oct 2026</text>
+</svg>
