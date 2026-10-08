@@ -12,7 +12,7 @@ from datetime import datetime
 import os
 
 class CMAESOptimizer:
-    def __init__(self, bounds, population_size, log_dir, joint_order, max_iteration, data, device, epsilon=None, sigma=0.5, save_interval=10, save_optimization_process=False, segment_edges_hz=(0.1, 4.0), sweep_kind="linear"):
+    def __init__(self, bounds, population_size, log_dir, joint_order, max_iteration, data, device, epsilon=None, sigma=0.5, save_interval=10, save_optimization_process=False, segment_edges_hz=(0.1, 4.0), sweep_kind="linear", groups=None, active_groups=None, warm_start=None, opt_delay=True):
 
         self.joint_order = joint_order
         self.max_iteration = max_iteration
@@ -36,12 +36,8 @@ class CMAESOptimizer:
                     }, log_dir + "/config.pt")
 
         self.bounds = bounds
-
-        bounds_normalized = torch.ones_like(bounds)
-        bounds_normalized[:, 0] *= -1
-        mean_normalized = torch.zeros_like(bounds[:, 0])
-
-        self.optimizer = cmaes.CMA(mean=mean_normalized.cpu().numpy(), sigma=sigma, bounds=bounds_normalized.cpu().numpy(), seed=0, population_size=population_size)
+        # CMA-ES 实例在这里不建 —— 挪到 delay_idx 之后，分组优化要先按参数块算出
+        # active 子集，只在子空间里建优化器。
 
         self.scores_counter = 0
         self.iteration_counter = 0
@@ -61,6 +57,76 @@ class CMAESOptimizer:
         self.friction_idx = slice(2 * num_joints, 3 * num_joints)
         self.bias_idx = slice(3 * num_joints, 4 * num_joints)
         self.delay_idx = 4 * num_joints
+
+        # ── 分组优化（手 / 腿 / 腰）─────────────────────────────────────────
+        # 每轮只搜一个组的参数（其余组冻结在 warm_start 上），子空间里单独建 CMA-ES。
+        #
+        # 为什么分组：各关节的力矩尺度差 ~45 倍（腕 coul/τ_applied ≈ 5.8%，
+        # 髋只有 0.04%），一个 bounds 尺度 + 一个 σ 覆盖全部 109 维时，必然有一组
+        # 被牺牲（实测：全场统一 bounds 那轮，轻关节 0.1% 准、髋/膝摩擦 400% 错）。
+        # 分组还能把维度从 109 降到 ~49，CMA-ES 收敛更好 → 残差底更低 → 摩擦误差
+        # 按 Δτ_f ≈ kp·残差 成比例下降。
+        #
+        # ⚠️ 损失仍然在全部 27 个关节上算，不按组裁剪。基座焊死 ⇒ 质量阵在支链
+        #    （左腿/右腿/腰→双臂）之间块对角、损失可加，所以对「腿 vs 臂」这与裁剪
+        #    等价、留着更简单；但支链内部（torso 是双臂的父关节）有耦合，必须保留。
+        # ⚠️ 验收指标是「残差」不是参数误差：TB 6_GroupResid/best_<组>（弧度 RMS）。
+        #    参数误差已经被证明被 kp·残差 卡死，抠它收益很低。
+        self.groups = {k: [int(j) for j in v] for k, v in
+                       (groups if groups else {"all": list(range(num_joints))}).items()}
+        self.group_idx = {k: torch.tensor(v, dtype=torch.long, device=device) for k, v in self.groups.items()}
+        self.real_dof_pos = data["dof_pos"].to(device)
+
+        _blocks = (0, num_joints, 2 * num_joints, 3 * num_joints)  # armature / damping / friction / bias
+        if active_groups is None or "all" in active_groups:
+            _act_joints = sorted({j for v in self.groups.values() for j in v})
+        else:
+            _missing = set(active_groups) - set(self.groups)
+            if _missing:
+                raise ValueError(f"未知分组 {sorted(_missing)}，可用: {sorted(self.groups)}")
+            _act_joints = sorted({j for g in active_groups for j in self.groups[g]})
+        _act = sorted({j + off for j in _act_joints for off in _blocks})
+        if opt_delay:
+            _act.append(self.delay_idx)          # 延时是全局的，每一轮都放开重新定
+        self.active_idx = torch.tensor(_act, dtype=torch.long, device=device)
+        self.opt_delay = opt_delay
+
+        # 冻结维的参考值（归一化空间 [0,1] 之外无意义，一律夹到 [-1,1]）。
+        # warm_start 给的是物理量纲的完整 109 维向量（就是 save_checkpoint 写的 mean_*.pt）。
+        if warm_start is not None:
+            _ws = torch.as_tensor(warm_start, device=device).float().flatten()
+            if _ws.numel() != bounds.shape[0]:
+                raise ValueError(f"warm_start 长度 {_ws.numel()} != 参数个数 {bounds.shape[0]}")
+            _z = 2.0 * (_ws - bounds[:, 0]) / (bounds[:, 1] - bounds[:, 0]) - 1.0
+            _oob = (_z < -1.0) | (_z > 1.0)
+            if _oob.any():
+                _blk_names = ("armature", "damping", "friction", "bias", "delay")
+                _desc = []
+                for _i in _oob.nonzero().flatten().tolist():
+                    _b = _i // num_joints if _i < 4 * num_joints else 4
+                    _jn = joint_order[_i % num_joints] if _i < 4 * num_joints else "delay"
+                    _desc.append(f"{_blk_names[_b]}@{_jn}={_ws[_i].item():.4g}")
+                print(f"[group] ⚠️ warm_start 有 {int(_oob.sum())} 个值落在 bounds 外，已夹到边界："
+                      f"{', '.join(_desc[:8])}{' ...' if len(_desc) > 8 else ''}")
+                print("[group] ⚠️ 这些维度若是冻结维，结果里的值就是被夹过的，不是 warm_start 原值。")
+            self.z_ref = _z.clamp(-1.0, 1.0)
+        else:
+            self.z_ref = torch.zeros(bounds.shape[0], device=device)
+
+        # 只在 active 子空间里建 CMA-ES；初始 mean = warm_start 在这几维上的取值
+        # （没有 warm_start 就是 0 = bounds 中点，与分组前的行为一致）。
+        _sub = bounds[self.active_idx]
+        _sub_norm = torch.ones_like(_sub)
+        _sub_norm[:, 0] *= -1
+        self.optimizer = cmaes.CMA(mean=self.z_ref[self.active_idx].cpu().numpy(), sigma=sigma,
+                                   bounds=_sub_norm.cpu().numpy(), seed=0, population_size=population_size)
+        _frozen_n = bounds.shape[0] - len(_act)
+        print(f"[group] active={len(_act)} 维 / {len(_act_joints)} 关节"
+              f"（{'含' if opt_delay else '不含'} delay），冻结 {_frozen_n} 维")
+        _opt_names = ([k for k, v in self.groups.items() if set(v) <= set(_act_joints)]
+                      if active_groups is not None else ["全部"])
+        print(f"[group] 初始 mean 取自 {'warm_start' if warm_start is not None else 'bounds 中点'}；"
+              f"优化组={_opt_names}")
 
         # --- 分段损失诊断：只写 TB，不改变 CMA-ES 看到的目标 -------------------
         # 线性 chirp 的瞬时频率是已知的：f(t) = f0 + (f1-f0)·t/T，所以按时间切段
@@ -121,10 +187,11 @@ class CMAESOptimizer:
             self.sim_params_buffer[self.iteration_counter, :, :] = self.sim_params
         solutions = []
         for i in range(self.optimizer.population_size):
-            solutions.append((self.params[i].cpu().numpy(), self.scores[i].item()))
+            # 只把 active 子空间交给 CMA-ES（冻结维不进 tell）
+            solutions.append((self.params[i, self.active_idx].cpu().numpy(), self.scores[i].item()))
         self.optimizer.tell(solutions)
         if self.save_interval > 0 and self.iteration_counter % self.save_interval == 0:
-            self.save_checkpoint(self._params_to_sim_params(torch.tensor(self.optimizer._mean, device=self.device)), self.iteration_counter)
+            self.save_checkpoint(self._params_to_sim_params(self._sub_to_full(self.optimizer._mean)), self.iteration_counter)
         self._print_iteration()
 
         self._reset_population()
@@ -139,16 +206,39 @@ class CMAESOptimizer:
     def finished(self):
         finished = self.max_iteration <= self.iteration_counter
         diff_score = (self.scores_buffer[self.iteration_counter - 1, :].max() - self.scores_buffer[self.iteration_counter - 1, :].min()) / self.scores_buffer[self.iteration_counter - 1, :].min()
-        finished = finished or (self.epsilon is not None and diff_score < self.epsilon)
+        # bool() 不能省：diff_score 是 0-dim tensor，or 会把 tensor 直接透传出来，
+        # 调用方拿到的就不是 bool 了（fit.py 里靠 if 的真值判断侥幸能用）。
+        # 注意 epsilon=0 时 diff_score < 0 恒不成立 ⇒ 等于关掉这个提前停止判据。
+        finished = bool(finished or (self.epsilon is not None and diff_score < self.epsilon))
         if finished:
             print("CMA-ES optimization finished.")
-            self.save_checkpoint(self._params_to_sim_params(torch.tensor(self.optimizer._mean, device=self.device)), self.iteration_counter - 1, finished=True)
+            self.save_checkpoint(self._params_to_sim_params(self._sub_to_full(self.optimizer._mean)), self.iteration_counter - 1, finished=True)
         return finished
 
     def _reset_population(self):
+        # 冻结维固定为 z_ref，只有 active_idx 维来自 CMA-ES 采样
+        self.params[:] = self.z_ref.unsqueeze(0)
         for i in range(self.optimizer.population_size):
-            self.params[i, :] = torch.tensor(self.optimizer.ask(), device=self.device)
+            # dtype 必须显式指定：ask() 是 float64 numpy，而花式索引赋值（index_put_）
+            # 不像基本切片那样隐式转 dtype，不加会 RuntimeError。
+            self.params[i, self.active_idx] = torch.as_tensor(
+                self.optimizer.ask(), device=self.device, dtype=self.params.dtype)
         self.sim_params = self._params_to_sim_params(self.params)
+
+    def _sub_to_full(self, sub_mean):
+        """把子空间里的 CMA-ES 均值展开回完整参数向量（冻结维取 z_ref）。"""
+        z = self.z_ref.clone()
+        z[self.active_idx] = torch.as_tensor(sub_mean, device=self.device, dtype=z.dtype).flatten()
+        return z
+
+    def _group_resid(self, min_index):
+        """最优个体在每组关节上的 RMS 位置残差 [rad] —— 分组优化的验收指标。
+
+        与 TB 的 0_Episode/score 同源（都是 sim - real - bias），只是按组分摊并
+        除以关节数，所以组间、轮次间可比。用整个轨迹重算，不复用 tell() 里的累加。
+        """
+        resid = self.sim_dof_pos_buffer[min_index] - self.real_dof_pos - self.sim_params[min_index, self.bias_idx]
+        return {g: resid[:, idx].pow(2).mean().sqrt().item() for g, idx in self.group_idx.items()}
 
     def update_simulator(self, articulation, joint_ids, initial_position):
         env_ids = torch.arange(len(self.sim_params[:, self.armature_idx]), device=self.device, dtype=torch.int32)
@@ -191,6 +281,10 @@ class CMAESOptimizer:
         print("Static/Dynamic Friction: ", self.sim_params[min_index, self.friction_idx].tolist())
         print("Bias: ", self.sim_params[min_index, self.bias_idx].tolist())
         print("Delay: ", self.sim_params[min_index, self.delay_idx].tolist())
+        # 分组残差：这一轮最优个体在各组关节上的 RMS 位置残差 [rad]。
+        # 判断「分组有没有用」看这个数降没降，不要看参数误差。
+        self._group_resid_last = self._group_resid(min_index.item())
+        print("Group RMS resid [rad]: " + ", ".join(f"{g}={v:.5f}" for g, v in self._group_resid_last.items()))
         print(f"Elapsed time: {(datetime.now() - self._timer_start).total_seconds():.1f} seconds")
         self._timer_start = datetime.now()
         self._log()
@@ -201,7 +295,7 @@ class CMAESOptimizer:
         return sim_params
 
     def get_best_sim_params(self):
-        best_params = torch.tensor(self.optimizer._mean)
+        best_params = self._sub_to_full(self.optimizer._mean)
         return self._params_to_sim_params(best_params)
 
     def _log(self):
@@ -223,6 +317,11 @@ class CMAESOptimizer:
         self.writer.add_scalar("0_Episode/score", min_score.item(), self.iteration_counter)
         self.writer.add_scalar("0_Episode/max_score", max_score.item(), self.iteration_counter)
         self.writer.add_scalar("0_Episode/diff_score", (max_score - min_score) / min_score, self.iteration_counter)
+
+        # 分组残差（弧度 RMS，按组内关节数摊平）：分组优化的验收指标。
+        # 跨轮次可比 —— 对比「分组前基线」和「分组后」看这几条线降没降。
+        for _g, _v in getattr(self, "_group_resid_last", {}).items():
+            self.writer.add_scalar(f"6_GroupResid/best_{_g}", _v, self.iteration_counter)
 
         # 分段损失：残差的频段分布。mean_* 与 0_Episode/score 同尺度；
         # share_* 是该段占总损失的份额（若干份额之和恒为 1），份额最高的那段
