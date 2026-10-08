@@ -15,6 +15,28 @@ from isaaclab.sim.spawners.from_files import UrdfFileCfg
 from isaaclab.sim.spawners.from_files import UsdFileCfg
 import isaaclab.sim as sim_utils
 
+# ── 对照组：全场统一 GT（与 data_collection.py 的 --uniform_gt 配对）────────
+# 目的：隔离「搜索维度」这一个变量。
+# ANYmal 的 round-trip 能到 <1%，一个尚未排除的原因是它的 GT 全场统一
+# （armature 0.1×12 / damping 4.5×12 / friction 0.05×12），且四条腿结构完全相同
+# → 损失对腿间参数置换有精确对称性 → 实际有效维度远小于 49。
+# S800 是 109 个逐关节不同的值，没有这个对称性。
+#
+# 打开后 armature/damping/friction 三段的 bounds 全部改为下面这组统一区间。
+# ⚠️ 必须与 data_collection.py 的 --uniform_gt 同时开/关。armature 尤其致命：
+#    现有 14 组分段区间的交集是空集（max(lo)=0.05 > min(hi)=0.02），
+#    只要有一边忘了切，统一真值就落在 bounds 外 —— 搜索不到，且不报错。
+#
+# 区间取值刻意对齐 ANYmal 的相对位置（真值落在归一化区间的 -0.8 处）：
+#   ANYmal armature 0.1 / [1e-5, 1.0] → -0.800
+#   这里   armature 0.05/ [0.001,0.5] → -0.796   ← 便于横向比较
+UNIFORM_GT = False
+UNIFORM_BOUNDS = {
+    "armature": (0.001, 0.50),
+    "damping":  (0.0,   2.00),
+    "friction": (0.0,   0.50),
+}
+
 S800_ACTUATOR_CFG = PaceDCMotorCfg(
     joint_names_expr=[".*"],
     saturation_effort=415.0, # 电机峰值扭矩 from XML
@@ -220,6 +242,16 @@ class S800PaceCfg(PaceCfg):
             # friction (coulomb) [54:81] — 下界一律 0（摩擦可以接近 0）
             self.bounds_params[54 + i, 0] = 0.0
             self.bounds_params[54 + i, 1] = FRICTION_PEAK_FRAC * PEAK_TORQUE[jtype]
+
+        # ── 对照组覆盖：三段 bounds 压成全场统一（见文件顶部 UNIFORM_GT 说明）──
+        # 放在逐关节循环之后，覆盖上面按类型设好的值；bias/delay 不受影响。
+        if UNIFORM_GT:
+            for _sl, _key in ((slice(0, 27), "armature"), (slice(27, 54), "damping"), (slice(54, 81), "friction")):
+                _lo, _hi = UNIFORM_BOUNDS[_key]
+                self.bounds_params[_sl, 0] = _lo
+                self.bounds_params[_sl, 1] = _hi
+            print(f"[UNIFORM_GT] 对照组 bounds 已启用: {UNIFORM_BOUNDS}")
+            print("[UNIFORM_GT] ⚠️ 确认 data_collection.py 用了 --uniform_gt，且值落在上述区间内。")
 
         self.bounds_params[81:108, 0] = -0.1
         self.bounds_params[81:108, 1] = 0.1  # bias between -0.1 - 0.1 [rad]

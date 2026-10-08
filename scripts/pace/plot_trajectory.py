@@ -165,9 +165,9 @@ GT_FRICTION = {
     "J30_ELBOW_PITCH_R": 0.3, "J31_ELBOW_YAW_R": 0.05, "J32_WRIST_PITCH_R": 0.05, "J33_WRIST_ROLL_R": 0.05,
 }
 
-
-# GT_VISCOUS = 1.6    # all joints
-# GT_FRICTION = 0.2   # all joints
+# GT_ARMATURE = 0.05
+# GT_VISCOUS = 0.5    # all joints
+# GT_FRICTION = 0.05   # all joints
 GT_BIAS = 0.05      # all joints
 GT_DELAY = 5        # sim steps
 
@@ -216,6 +216,9 @@ if plot_table:
         a_gt = GT_ARMATURE.get(name, 0.0)
         v_gt = GT_VISCOUS.get(name, 0.0)
         f_gt = GT_FRICTION.get(name, 0.0)
+        # a_gt = GT_ARMATURE
+        # v_gt = GT_VISCOUS
+        # f_gt = GT_FRICTION
         b_gt = GT_BIAS
 
         # Identified
@@ -239,8 +242,8 @@ if plot_table:
         print(
             f"{name:<28}"
             f"{a_gt:>10.4f} {a_id:>10.4f} {a_err_str}"
-            f"  {v_gt:>9.1f} {v_id:>9.4f} {v_err_str}"
-            f"  {f_gt:>9.1f} {f_id:>9.4f} {f_err_str}"
+            f"  {v_gt:>9.4f} {v_id:>9.4f} {v_err_str}"
+            f"  {f_gt:>9.4f} {f_id:>9.4f} {f_err_str}"
             f"  {b_gt:>9.2f} {b_id:>9.4f} {b_err_str}"
         )
 

@@ -19,6 +19,22 @@ parser.add_argument("--min_frequency", type=float, default=0.1, help="Minimum fr
 parser.add_argument("--max_frequency", type=float, default=4.0, help="Maximum frequency for the chirp signal in Hz. Ignored per-joint when --grouped-sweep is on (the default); used as the uniform fallback otherwise. ⚠️ 改这里必须同步改 pace_sim2real_env_cfg.py 的 segment_edges_hz（首尾须一致）。")
 parser.add_argument("--grouped_sweep", action=argparse.BooleanOptionalAction, default=False, help="EXPERIMENTAL, off by default. Gives each joint its own sweep ceiling (3 Hz slow / 6 Hz fast) plus a per-joint phase offset. Measured to be WORSE than the uniform sweep: fast joints mistrack and the out-of-phase legs collide with each other. Enable with --grouped-sweep only if you also make L/R symmetric joints share a phase.")
 parser.add_argument("--duration", type=float, default=20.0, help="Duration of the chirp signal in seconds.")
+# ── 对照组：全场统一 GT ──────────────────────────────────────────────────
+# 目的：隔离「搜索维度」这一个变量。
+# ANYmal 的 round-trip 能到 <1%，一个尚未排除的原因是它的 GT 全场统一
+# （armature 0.1×12 / damping 4.5×12 / friction 0.05×12），且四条腿结构完全相同
+# → 损失对腿间参数置换有精确对称性 → 实际有效维度远小于 49。
+# S800 现在是 109 个逐关节不同的值，没有这个对称性。
+# ⚠️ 打开时必须同时把 s800_pace_env_cfg.py 的 UNIFORM_GT 设为 True，否则 GT 会
+#    落在 bounds 外 —— armature 尤其：现有 14 组分段区间的交集是空集
+#    （max(lo)=0.05 > min(hi)=0.02），统一值无处可放。
+# 注意：S800 的 27 个关节动力学各不相同（不像 ANYmal 四条腿相同），所以置换对称
+#       性比 ANYmal 弱 —— 这个对照能排除维度，但不等价于复刻 ANYmal 的实验。
+parser.add_argument("--uniform_gt", action=argparse.BooleanOptionalAction, default=False,
+                    help="对照组：armature/damping/friction 的 GT 改为全场统一值。必须与 cfg 的 UNIFORM_GT 同步。")
+parser.add_argument("--uniform_armature", type=float, default=0.05, help="--uniform_gt 时的统一 armature [kg m^2]。")
+parser.add_argument("--uniform_damping", type=float, default=0.5, help="--uniform_gt 时的统一 viscous friction [Nm s/rad]。")
+parser.add_argument("--uniform_friction", type=float, default=0.05, help="--uniform_gt 时的统一 coulomb friction [Nm]。取 0.05 是为了保证任何关节都不会被锁死（最小的 kp*A = 1.80 Nm）。")
 # append AppLauncher cli args
 AppLauncher.add_app_launcher_args(parser)
 # parse the arguments
@@ -105,6 +121,17 @@ def main():
         0.3, 0.3, 0.3, 0.3, 0.05, 0.05, 0.05,  # 左臂
         0.3, 0.3, 0.3, 0.3, 0.05, 0.05, 0.05,  # 右臂
     ], device=env.unwrapped.device).unsqueeze(0)
+
+    # ── 对照组覆盖：把上面三组分段 GT 压成全场统一值 ─────────────────────
+    # 用 fill_ 覆盖而不是重建，这样上面那套分组值仍然留在代码里作参考，
+    # 也保证两条路径的 shape/dtype/device 完全一致。
+    if args_cli.uniform_gt:
+        armature.fill_(args_cli.uniform_armature)
+        damping.fill_(args_cli.uniform_damping)
+        friction.fill_(args_cli.uniform_friction)
+        print(f"[uniform_gt] 对照组已启用: armature={args_cli.uniform_armature} "
+              f"damping={args_cli.uniform_damping} friction={args_cli.uniform_friction}  (全场 27 关节)")
+        print("[uniform_gt] ⚠️ 确认 s800_pace_env_cfg.py 的 UNIFORM_GT 已设为 True，否则真值落在 bounds 外。")
 
     bias = torch.tensor([0.05] * 27, device=env.unwrapped.device).unsqueeze(0)
 
