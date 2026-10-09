@@ -2,6 +2,7 @@
 # Author: Filip Bjelonic
 # Licensed under the Apache License 2.0
 
+import sys
 import torch
 import matplotlib.pyplot as plt
 import re
@@ -15,6 +16,10 @@ parser = argparse.ArgumentParser(description="Pace agent for Isaac Lab environme
 parser.add_argument("--folder_name", type=str, default=None, help="Name of the folder to use.")
 parser.add_argument("--mean_name", type=str, default=None, help="Name of the parameters file to use.")
 parser.add_argument("--robot_name", type=str, default="s800_sim", help="Name of the robot.")
+parser.add_argument("--gt_preset", type=str, default="auto", choices=("auto", "design", "uniform"),
+                    help="出表的真值口径。auto=优先用 run 的 config.pt 里带的注入真值（新版 "
+                         "data_collection 会写进去），没有才回落到硬编码的 S800 分段表；"
+                         "design/uniform=强制用回落的 S800 表（只给 26_09_28~30 那批老 run 用）。")
 parser.add_argument("--plot_trajectory", action="store_true", help="Whether to plot the trajectory.")
 parser.add_argument("--plot_score", action="store_true", help="Whether to plot the score over iterations.")
 parser.add_argument("--plot_table", action="store_true", help="Whether to print and save a parameter comparison table.")
@@ -125,53 +130,71 @@ if plot_trajectory:
         plt.show()
 
 # ----------------------------------------------------------------------------
-# Parameter comparison table: identified vs. ground-truth (preset) values
+# Parameter comparison table: identified vs. ground truth
 # ----------------------------------------------------------------------------
-# Ground-truth values used in data_collection.py to generate the "real" data.
-# These must be kept in sync with scripts/pace/data_collection.py.
-GT_ARMATURE = {
-    "J00_HIP_PITCH_L": 0.24, "J01_HIP_ROLL_L": 0.14, "J02_HIP_YAW_L": 0.05,
-    "J03_KNEE_PITCH_L": 0.24, "J04_ANKLE_PITCH_L": 0.05, "J05_ANKLE_ROLL_L": 0.05,
-    "J06_HIP_PITCH_R": 0.24, "J07_HIP_ROLL_R": 0.14, "J08_HIP_YAW_R": 0.05,
-    "J09_KNEE_PITCH_R": 0.24, "J10_ANKLE_PITCH_R": 0.05, "J11_ANKLE_ROLL_R": 0.05,
-    "J12_TORSO_YAW": 0.05,
-    "J13_SHOULDER_PITCH_L": 0.05, "J14_SHOULDER_ROLL_L": 0.05, "J15_SHOULDER_YAW_L": 0.05,
-    "J16_ELBOW_PITCH_L": 0.05, "J17_ELBOW_YAW_L": 0.008, "J18_WRIST_PITCH_L": 0.008, "J19_WRIST_ROLL_L": 0.008,
-    "J27_SHOULDER_PITCH_R": 0.05, "J28_SHOULDER_ROLL_R": 0.05, "J29_SHOULDER_YAW_R": 0.05,
-    "J30_ELBOW_PITCH_R": 0.05, "J31_ELBOW_YAW_R": 0.008, "J32_WRIST_PITCH_R": 0.008, "J33_WRIST_ROLL_R": 0.008,
-}
+# 真值来源（优先级从高到低）：
+#   1. run 自己的 config.pt 里带的「注入真值」—— data_collection.py 把它写进 chirp_data.pt，
+#      fit 再转发到 config.pt。**新跑的 run 都走这条，永远和数据本身一致。**
+#   2. 回落到 scripts/pace/robot_tables.py 里该机器人的注入真值表（单一数据源，和
+#      data_collection 用的是同一份，不会漂移）。老 run（26_09_28~30）没有字段 1，走这条。
+#   3. `--gt_preset uniform` 用对照组（全场统一值），只对 S800 有意义。
+# ⚠️ 关节名对不上会**直接报错**，不会再静默显示 0% 误差（那个假完美踩过两次）。
+sys.path.insert(0, str(Path(__file__).parent))
+from robot_tables import JOINT_ORDER, ROBOT_TABLES, UNIFORM_CONTROL  # noqa: E402
 
-GT_VISCOUS = {
-    "J00_HIP_PITCH_L": 1.6, "J01_HIP_ROLL_L": 1.6, "J02_HIP_YAW_L": 1.0,
-    "J03_KNEE_PITCH_L": 1.6, "J04_ANKLE_PITCH_L": 0.5, "J05_ANKLE_ROLL_L": 0.5,
-    "J06_HIP_PITCH_R": 1.6, "J07_HIP_ROLL_R": 1.6, "J08_HIP_YAW_R": 1.0,
-    "J09_KNEE_PITCH_R": 1.6, "J10_ANKLE_PITCH_R": 0.5, "J11_ANKLE_ROLL_R": 0.5,
-    "J12_TORSO_YAW": 1.0,
-    "J13_SHOULDER_PITCH_L": 0.5, "J14_SHOULDER_ROLL_L": 0.5, "J15_SHOULDER_YAW_L": 0.5,
-    "J16_ELBOW_PITCH_L": 0.5, "J17_ELBOW_YAW_L": 0.1, "J18_WRIST_PITCH_L": 0.1, "J19_WRIST_ROLL_L": 0.1,
-    "J27_SHOULDER_PITCH_R": 0.5, "J28_SHOULDER_ROLL_R": 0.5, "J29_SHOULDER_YAW_R": 0.5,
-    "J30_ELBOW_PITCH_R": 0.5, "J31_ELBOW_YAW_R": 0.1, "J32_WRIST_PITCH_R": 0.1, "J33_WRIST_ROLL_R": 0.1,
-}
 
-GT_FRICTION = {
-    "J00_HIP_PITCH_L": 1.0, "J01_HIP_ROLL_L": 1.0, "J02_HIP_YAW_L": 0.3,
-    "J03_KNEE_PITCH_L": 1.0, "J04_ANKLE_PITCH_L": 0.3, "J05_ANKLE_ROLL_L": 0.3,
-    "J06_HIP_PITCH_R": 1.0, "J07_HIP_ROLL_R": 1.0, "J08_HIP_YAW_R": 0.3,
-    "J09_KNEE_PITCH_R": 1.0, "J10_ANKLE_PITCH_R": 0.3, "J11_ANKLE_ROLL_R": 0.3,
-    "J12_TORSO_YAW": 0.3,
-    "J13_SHOULDER_PITCH_L": 0.3, "J14_SHOULDER_ROLL_L": 0.3, "J15_SHOULDER_YAW_L": 0.3,
-    "J16_ELBOW_PITCH_L": 0.3, "J17_ELBOW_YAW_L": 0.05, "J18_WRIST_PITCH_L": 0.05, "J19_WRIST_ROLL_L": 0.05,
-    "J27_SHOULDER_PITCH_R": 0.3, "J28_SHOULDER_ROLL_R": 0.3, "J29_SHOULDER_YAW_R": 0.3,
-    "J30_ELBOW_PITCH_R": 0.3, "J31_ELBOW_YAW_R": 0.05, "J32_WRIST_PITCH_R": 0.05, "J33_WRIST_ROLL_R": 0.05,
-}
+def _resolve_gt(cfg, robot_key, preset):
+    """返回 (armature, viscous, friction, bias 四张 {关节名: 值} 表, delay, 来源说明)。"""
+    gt = cfg.get("gt") if isinstance(cfg, dict) else None
+    if gt is not None and preset == "auto":
+        order = [str(n) for n in gt["joint_order"]]
+        if order != [str(n) for n in joint_order]:
+            raise SystemExit(
+                "[gt] ❌ config.pt 里记的 joint_order 与本 run 的 joint_order 不一致 —— "
+                "这份 config 不是这个数据集的，不能用它出表。")
+        mk = lambda key: {n: float(v) for n, v in zip(order, gt[key])}  # noqa: E731
+        return (mk("armature"), mk("damping"), mk("friction"), mk("bias"),
+                float(gt["delay"]), "config.pt 里记录的注入真值")
 
-# GT_ARMATURE = 0.05
-# GT_VISCOUS = 0.5    # all joints
-# GT_FRICTION = 0.05   # all joints
-GT_BIAS = 0.05      # all joints
-GT_DELAY = 5        # sim steps
+    table = ROBOT_TABLES.get(robot_key)
+    order = JOINT_ORDER.get(robot_key)
+    if table is None or order is None:
+        raise SystemExit(
+            f"[gt] ❌ robot_tables.py 里没有 {robot_key}（可用：{sorted(ROBOT_TABLES)}）。"
+            f"用 --robot_name 指定机器人。")
+    if sorted(order) != sorted(joint_order):
+        raise SystemExit(
+            f"[gt] ❌ robot_tables.py 里 {robot_key} 的关节列表与本 run 的 joint_order 对不上\n"
+            f"     表里 {len(order)} 个，run 里 {len(joint_order)} 个。"
+            f"数据可能是别的机器人采的，或表被改过。")
+
+    if preset == "uniform":
+        u = UNIFORM_CONTROL.get(robot_key)
+        if u is None:
+            raise SystemExit(f"[gt] ❌ {robot_key} 没有 uniform 对照组（只有 S800 做过）。")
+        return ({n: u["armature"] for n in joint_order}, {n: u["viscous"] for n in joint_order},
+                {n: u["friction"] for n in joint_order}, {n: u["bias"] for n in joint_order},
+                u["delay"], f"--gt_preset uniform（全场 {u['armature']}/{u['viscous']}/{u['friction']}）")
+
+    print("[gt] ⚠️ config.pt 里没有注入真值（老数据文件），回落到 robot_tables.py 的注入真值表。"
+          "若这轮是用 --uniform_gt 采的，请加 --gt_preset uniform，否则算出来的误差是假的。")
+    return (dict(zip(order, table["armature"])), dict(zip(order, table["damping"])),
+            dict(zip(order, table["friction"])), {n: table["bias_gt"] for n in order},
+            table["delay_gt"], f"robot_tables.py 的 {robot_key} 表（回落）")
+
 
 if plot_table:
+    gt_arm, gt_vis, gt_fri, gt_bias, gt_delay, gt_src = _resolve_gt(config, args.robot_name, args.gt_preset)
+    _missing = [n for n in joint_order
+                if n not in gt_arm or n not in gt_vis or n not in gt_fri or n not in gt_bias]
+    if _missing:
+        raise SystemExit(
+            f"[gt] ❌ 有 {len(_missing)} 个关节在 GT 表里查不到：{_missing[:6]}"
+            f"{' ...' if len(_missing) > 6 else ''}\n"
+            f"     当前真值来源 = {gt_src}\n"
+            f"     名字对不上时误差会静默变成 0%，所以这里直接退出而不是照常出表。\n"
+            f"     新数据请用新版 data_collection.py 重采一次（注入真值会随数据落盘），"
+            f"或用 --gt_preset 指定正确口径。")
     num_joints = len(joint_order)
 
     # Extract identified parameters from the mean vector
@@ -205,21 +228,28 @@ if plot_table:
     )
     sep = "=" * len(header)
 
-    print("\n" + sep)
+    print(f"\n# 真值来源: {gt_src}   (--gt_preset={args.gt_preset})")
+    # 哪些关节真的被拟合了。--group legs 这类分组轮里，其余关节的参数停在 bounds 中点，
+    # 拿它们去和真值比会显示成一片巨大的误差 —— 那是「没拟合」，不是「拟合错了」。
+    _fitted = config.get("fitted_joints")
+    _fitted_set = set(_fitted) if _fitted is not None else None
+    if _fitted_set is not None and len(_fitted_set) < len(joint_order):
+        _names = [joint_order[i] for i in sorted(_fitted_set)]
+        print(f"# 本轮只拟合了 {len(_fitted_set)}/{len(joint_order)} 个关节："
+              f"{', '.join(_names[:6])}{' ...' if len(_names) > 6 else ''}")
+        print("# 其余关节标 '·nf'（not fitted），它们的误差不代表拟合质量。")
+    print(sep)
     print(header)
     print(sep)
 
     csv_rows = []
 
     for i, name in enumerate(joint_order):
-        # Ground truth
-        a_gt = GT_ARMATURE.get(name, 0.0)
-        v_gt = GT_VISCOUS.get(name, 0.0)
-        f_gt = GT_FRICTION.get(name, 0.0)
-        # a_gt = GT_ARMATURE
-        # v_gt = GT_VISCOUS
-        # f_gt = GT_FRICTION
-        b_gt = GT_BIAS
+        # Ground truth（来自 config.pt 的注入真值，或 --gt_preset 指定的回落表）
+        a_gt = gt_arm[name]
+        v_gt = gt_vis[name]
+        f_gt = gt_fri[name]
+        b_gt = gt_bias[name]
 
         # Identified
         a_id = id_armature[i].item()
@@ -245,6 +275,7 @@ if plot_table:
             f"  {v_gt:>9.4f} {v_id:>9.4f} {v_err_str}"
             f"  {f_gt:>9.4f} {f_id:>9.4f} {f_err_str}"
             f"  {b_gt:>9.2f} {b_id:>9.4f} {b_err_str}"
+            + ("   ·nf" if _fitted_set is not None and i not in _fitted_set else "")
         )
 
         csv_rows.append([name, a_gt, a_id, a_err, v_gt, v_id, v_err, f_gt, f_id, f_err, b_gt, b_id, b_err])
@@ -252,13 +283,13 @@ if plot_table:
     print(sep)
 
     # Delay row
-    d_err = (id_delay - GT_DELAY) / GT_DELAY * 100 if GT_DELAY != 0 else 0.0
+    d_err = (id_delay - gt_delay) / gt_delay * 100 if gt_delay != 0 else 0.0
     d_err_padded = f"{d_err:+.1f}%"
     if abs(d_err) < 50.0:
         d_err_str = f"{GREEN}{d_err_padded}{RESET}"
     else:
         d_err_str = f"{RED}{d_err_padded}{RESET}"
-    print(f"Delay: GT={GT_DELAY}, ID={id_delay:.4f}, Err={d_err_str}")
+    print(f"Delay: GT={gt_delay:g}, ID={id_delay:.4f}, Err={d_err_str}")
 
     # Save CSV
     csv_path = log_dir / "param_comparison.csv"
@@ -272,7 +303,7 @@ if plot_table:
             "Bias_GT", "Bias_ID", "Bias_Err%",
         ])
         writer.writerows(csv_rows)
-        writer.writerow(["Delay", GT_DELAY, id_delay, f"{d_err:.1f}"])
+        writer.writerow(["Delay", gt_delay, id_delay, f"{d_err:.1f}"])
     print(f"\nComparison table saved to: {csv_path}")
 
 print("Plotting complete.")

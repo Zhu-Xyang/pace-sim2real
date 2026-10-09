@@ -106,11 +106,39 @@ if u are using s800 robot
 python scripts/pace/data_collection.py --task=Isaac-Pace-S800-v0
 ```
 
+if u are using Unitree G1 (29 dof)
+```bash
+python scripts/pace/data_collection.py --task=Isaac-Pace-G1-v0 --headless
+```
+
 This will collect simulation data and store results in:
 
 ```
-data/anymal_d_sim/chirp_data.pt
+data/<robot_name>/chirp_data.pt      # s800_sim / g1_sim / anymal_d_sim
 ```
+
+#### 真值从哪来：单一数据源 `scripts/pace/robot_tables.py`
+
+采集脚本按 env cfg 的 `robot_name` 从 **`scripts/pace/robot_tables.py`** 取该机器人的
+「注入真值 + 激励设计」（armature / damping / friction / directions / bias / scale …）。
+这份表同时被 `plot_trajectory.py` 和 `check_mirror_symmetry.py` import ——
+**改真值只改这一个文件**，三处不会漂移。
+
+⚠️ 几个硬约束（采集脚本会在注入前自动检查）：
+
+- **真值必须落在 env cfg 的 `bounds_params` 内**。越界时 CMA-ES 会贴着边界收敛
+  **且不报错**，表现是一个看起来正常的错值。
+- **激励指令必须落在关节行程内**（`bias ± 0.4×半行程` 一般可以，但带重力塌陷的关节
+  ——比如 G1 的 `waist_roll/pitch`——实际位置会被压低，要单独处理）。
+- `directions` **每台机器人都不一样，不能照抄**，改完用
+  `python scripts/check_mirror_symmetry.py --robot <s800|g1>` 校验（退出码 0 = 通过）。
+
+采集完先做一次体检再往下走：关节有没有被锁死/贴限位、力矩和速度有没有顶到 limit、
+**误差里高于扫频上限的能量占比**（超出指令带宽的频率只可能来自自激 —— 通常是
+**延时 + 增益**导致的闭环失稳，不是激励设计的问题）。判据要用实际带宽：`--max_frequency`
+现在默认 10Hz，所以看 >10Hz 的占比；对着 4Hz 的老数据（26_09_30）就得看 >4Hz。
+⚠️ 别把带宽当常量记：26_09_29 采的是 0.1–2Hz、26_09_30 是 0.1–4Hz、G1 是 0.1–10Hz
+（`chirp_data.pt` 的 `chirp` 字段记着实际值，老数据可由 `cma_es.infer_sweep_band()` 反解）。
 
 ### 3. Run PACE parameter fitting
 
@@ -123,35 +151,44 @@ if u are using s800 robot
 python scripts/pace/fit.py --headless --task=Isaac-Pace-S800-v0
 ```
 
+if u are using Unitree G1
+```bash
+python scripts/pace/fit.py --headless --task=Isaac-Pace-G1-v0
+```
+
 This will estimate the actuator and joint parameters using CMA-ES and store results in:
 
 ```
-logs/pace/anymal_d_sim/
+logs/pace/<robot_name>/<YY_MM_DD_HH-MM-SS>/
 ```
+
+⚠️ `--task` 的默认值是 `Isaac-Pace-S800-v0` —— 跑别的机器人**必须显式传**，否则会拿
+S800 的 cfg 去找 `data/s800_sim/` 的数据，然后因为 `joint_order` 对不上而崩。
 
 ---
 
-#### 3.1 参数布局（109 维）
+#### 3.1 参数布局（4n+1 维）
 
-`4 × n_joints + 1 = 109`（S800 27 个关节），每一段内部按 env cfg 的 `joint_order` 排列：
+`4 × n_joints + 1`：S800 是 27 关节 → 109 维，G1 是 29 关节 → 117 维。
+
+每一段内部按 env cfg 的 `joint_order` 排列（n = 27 时）：
 
 | 下标 | 参数 | 单位 | 说明 |
 |---|---|---|---|
-| `[0:27]` | armature | kg·m² | 转子惯量，等效到关节侧 |
-| `[27:54]` | viscous friction | Nm·s/rad | 粘性摩擦 |
-| `[54:81]` | coulomb friction | Nm | 库仑摩擦（PhysX 里 static = dynamic 时生效） |
-| `[81:108]` | encoder bias | rad | 编码器零位偏差 |
-| `[108]` | delay | sim steps @400 Hz | 指令延时，全局一个 |
+| `[0:n]` | armature | kg·m² | 转子惯量，等效到关节侧 |
+| `[n:2n]` | viscous friction | Nm·s/rad | 粘性摩擦 |
+| `[2n:3n]` | coulomb friction | Nm | 库仑摩擦（PhysX 里 static = dynamic 时生效） |
+| `[3n:4n]` | encoder bias | rad | 编码器零位偏差 |
+| `[4n]` | delay | sim steps @400 Hz | 指令延时，全局一个 |
 
-搜索区间来自 `s800_pace_env_cfg.py` 的 `bounds_params`（`__post_init__` 里按关节类型设置），
-**CMA-ES 的初始均值 = 区间中点**。⚠️ 真值必须落在区间内：越界时 CMA-ES 会贴着边界收敛
-且不报错，表现是一个看起来正常的错值。
+搜索区间来自各机器人 env cfg 的 `bounds_params`（`__post_init__` 里按关节类型设置），
+**CMA-ES 的初始均值 = 区间中点**。⚠️ 注入的真值必须落在区间内 —— 见第 2 节的硬约束。
 
 #### 3.2 命令行选项
 
 | 选项 | 默认 | 说明 |
 |---|---|---|
-| `--task` | `Isaac-Pace-S800-v0` | 任务名，决定用哪份 env cfg |
+| `--task` | `Isaac-Pace-S800-v0` | 任务名，决定用哪份 env cfg。跑别的机器人必须显式传 |
 | `--num_envs` | `4096` | 同时等于 CMA-ES 的种群大小 |
 | `--headless` | off | 无 GUI（服务器上必加） |
 | `--group` | `all` | 只优化某几组关节，见 3.3。可逗号组合 `legs,torso` |
@@ -236,14 +273,19 @@ python scripts/pace/fit.py --headless --task=Isaac-Pace-S800-v0 \
 #### 3.4 输出文件
 
 ```
-logs/pace/s800_sim/<YY_MM_DD_HH-MM-SS>/
+logs/pace/<robot_name>/<YY_MM_DD_HH-MM-SS>/
 ├── config.pt            # bounds / joint_order / 本轮拟合用的 dof_pos,des_dof_pos,time
-├── mean_<iter>.pt       # 每 save_interval(=25) 代一次，109 维物理量纲向量
-├── best_trajectory.pt   # 该代最优个体的仿真轨迹 (T × 27)
+│                        #   + gt：**采集时注入的真值**（新数据文件才有）
+├── mean_<iter>.pt       # 每 save_interval(=25) 代一次，4n+1 维物理量纲向量
+├── best_trajectory.pt   # 该代最优个体的仿真轨迹 (T × n_joints)
 └── events.out.tfevents.*  # TensorBoard
 ```
 
 `mean_*.pt` 的布局与 3.1 的表一致，可以直接被 `--warm_start` 和 `plot_trajectory.py` 读取。
+
+`config.pt` 里的 `gt` 是**这轮拟合用的数据在采集时注入的真值**（`data_collection.py` 写进
+`chirp_data.pt`，fit 转发过来）。它让每个 run 自洽：`data/` 是共享路径、会被下一次采集
+覆盖，出表时只能靠 run 自己的记录 —— 这也是 `plot_trajectory.py` 出表的首选真值来源。
 
 #### 3.5 怎么判断一轮拟合好不好
 
@@ -266,7 +308,7 @@ TensorBoard 里按重要性看：
 | `1_Armature` `2_Viscous_Friction` `3_Static_Dynamic_Friction` `4_Bias` | 逐关节参数收敛过程 |
 | `0_Delay/best` | 延时收敛过程 |
 
-分组拟合前的各组残差基线（best member，同口径）：
+分组拟合前的各组残差基线（S800，best member，同口径）：
 
 | run | legs | torso | arms |
 |---|---|---|---|
@@ -277,21 +319,43 @@ TensorBoard 里按重要性看：
 判断标准：`--group legs` 跑完后 `6_GroupResid/best_legs` 应明显低于基线，且 torso/arms
 不应变差。**如果没降就说明分组没用，不要继续跑 arms/torso。**
 
-⚠️ 一个口径陷阱：`data_dir` 指向的 `chirp_data.pt` 一旦被覆盖，之前的 run 就没法复现了；
-`UNIFORM_GT`（cfg）必须和 `data_collection.py --uniform_gt` 在采集时保持一致，否则真值
-落在 bounds 外、静默不可辨识。
+⚠️ 口径陷阱：`data_dir` 指向的 `chirp_data.pt` 会被下一次采集覆盖，所以每个 run 只能靠
+自己的 `config.pt` 复现（真值也在里面，见 3.4）。老 run（26_09_28~30）的 config 里没有
+`gt`，`plot_trajectory.py` 会回落到 `robot_tables.py` 并打印警告；其中 uniform 那轮要加
+`--gt_preset uniform`，否则误差是拿分段真值算的假值。
 
 ### 4. Visualize results
 ```bash
 python scripts/pace/plot_trajectory.py --plot_table --plot_trajectory --robot_name=s800_sim
+# G1:
+python scripts/pace/plot_trajectory.py --plot_table --robot_name=g1_sim
 ```
 options
 ```bash
---plot_trajectory 
+--plot_trajectory
 --plot_table
---robot_name=s800_sim
---folder_name=26_09_17_11-02-54 \
---mean_name=mean_499.pt
+--robot_name=s800_sim            # 也决定去哪找 run（logs/pace/<robot_name>/）
+--folder_name=26_09_17_11-02-54  # 不给就取最新的 run
+--mean_name=mean_499.pt          # 不给就取迭代数最大的 mean_*.pt
+--gt_preset=auto                 # auto|design|uniform，见下
+```
+
+**表里的真值来源**（表头会自己打印出来）：
+
+| 优先级 | 来源 | 适用 |
+|---|---|---|
+| 1 | run 的 `config.pt` 里的 `gt`（采集时注入的真值） | 新 run，**永远和数据本身一致** |
+| 2 | `robot_tables.py` 里该机器人的表（回落） | 老 run（26_09_28~30） |
+| 3 | `--gt_preset uniform` 的对照组 | 只对 S800 有意义（26_09_30 那轮） |
+
+关节名对不上会**直接报错**，不会静默显示 0% 误差（那个「完美拟合」的假象踩过两次）。
+
+配套校验脚本：
+
+```bash
+python scripts/check_mirror_symmetry.py --robot g1    # 激励镜像对称性（退出码 0 = 通过）
+python scripts/joint_order_validation.py --task Isaac-Pace-G1-v0 --headless
+                                                      # 关节名/驱动覆盖/限位/空动作 step
 ```
 
 ---

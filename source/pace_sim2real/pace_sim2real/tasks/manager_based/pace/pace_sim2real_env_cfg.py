@@ -94,9 +94,12 @@ class CMAESOptimizerCfg:
     save_interval: int = 25
     save_optimization_process: bool = False  # consume more disk space if True, saves optimization process after finishing
     # 分段损失诊断的频段边界 [Hz]。只写 TB（5_BandLoss/*），不参与 CMA-ES 的 tell()。
-    # ⚠️ 首尾必须等于 data_collection.py 的 --min_frequency / --max_frequency。
     # 设为空 tuple 关闭。段数 = len - 1。
-    segment_edges_hz: tuple = (0.1, 0.2, 0.4, 0.8, 1.2, 1.6, 2.0, 2.8, 4.0)
+    # 「段号 → 频段」的**内部边界网格**。两端不用管：实际扫频带由 chirp_data.pt
+    # 的 "chirp" 字段（老数据则由 des_dof_pos 反解）钉死，落在外面的边界会被丢掉。
+    # 以前这两端要手工和 data_collection.py 的 --min/--max_frequency 对齐，已经错位过
+    # 一轮（26_09_29 是 0.1-2Hz、26_09_30 是 0.1-4Hz、G1 是 0.1-10Hz，配置恒为 0.1-4）。
+    segment_edges_hz: tuple = (0.1, 0.2, 0.4, 0.8, 1.2, 1.6, 2.0, 2.8, 4.0, 5.5, 7.0, 10.0)
     # 扫频方式，必须和 data_collection.py 一致："linear" | "log"。
     # 它决定「时间步 ↔ 瞬时频率」的映射，搞错只会让 TB 的频段标签错位，不会报错。
     sweep_kind: str = "linear"

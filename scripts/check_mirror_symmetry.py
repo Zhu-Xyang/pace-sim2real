@@ -20,16 +20,21 @@ PACE 原文对**悬吊真机**采集要求对称指令以抵消净基座力旋�
 ⚠️ 常见错误判据是「两个轴向量是否相同」—— 那只在轴落在镜面内时成立。
    纯 pitch 轴（如 (0,1,0)）满足 M·a_L = -a_L，两向量"看起来一样"，
    但它恰恰是需要 dir_R = +1 的镜像情形。
+⚠️ 每台机器人的转轴不同，方向数组**不能照抄**（G1 的肩偏航/腕部就与 S800 相反，
+   且 G1 的髋轴是斜的 [0.98,0,0.17]，不能按名字猜）。
 
 用法
 ----
-    python scripts/check_mirror_symmetry.py
+    python scripts/check_mirror_symmetry.py --robot s800
+    python scripts/check_mirror_symmetry.py --robot g1
 
 退出码 0 = 全部通过；1 = 有不一致。
 """
 
 from __future__ import annotations
 
+import argparse
+import ast
 import re
 import sys
 import xml.etree.ElementTree as ET
@@ -38,22 +43,29 @@ from pathlib import Path
 import numpy as np
 
 REPO = Path(__file__).resolve().parents[1]
-URDF = REPO / "assets_robot/engineai_S800/urdf/serial_s800.urdf"
 COLLECTOR = REPO / "scripts/pace/data_collection.py"
-
-JOINT_ORDER = [
-    "J00_HIP_PITCH_L", "J01_HIP_ROLL_L", "J02_HIP_YAW_L", "J03_KNEE_PITCH_L",
-    "J04_ANKLE_PITCH_L", "J05_ANKLE_ROLL_L",
-    "J06_HIP_PITCH_R", "J07_HIP_ROLL_R", "J08_HIP_YAW_R", "J09_KNEE_PITCH_R",
-    "J10_ANKLE_PITCH_R", "J11_ANKLE_ROLL_R",
-    "J12_TORSO_YAW",
-    "J13_SHOULDER_PITCH_L", "J14_SHOULDER_ROLL_L", "J15_SHOULDER_YAW_L",
-    "J16_ELBOW_PITCH_L", "J17_ELBOW_YAW_L", "J18_WRIST_PITCH_L", "J19_WRIST_ROLL_L",
-    "J27_SHOULDER_PITCH_R", "J28_SHOULDER_ROLL_R", "J29_SHOULDER_YAW_R",
-    "J30_ELBOW_PITCH_R", "J31_ELBOW_YAW_R", "J32_WRIST_PITCH_R", "J33_WRIST_ROLL_R",
-]
-
 MIRROR = np.diag([1.0, -1.0, 1.0])
+
+# 机器人配置：ROBOT_TABLES 里的键 / URDF / joint_order / 基座 link
+# 关节表与方向数组都取自 scripts/pace/robot_tables.py（单一数据源）——
+# 以前这里各存一份，改了真值/激励不同步就会静默校验通过。
+sys.path.insert(0, str(REPO / "scripts/pace"))
+from robot_tables import JOINT_ORDER, ROBOT_TABLES  # noqa: E402
+
+# 校验器专用的信息：URDF 路径 + 哪个 link 是（固定的）基座
+ROBOTS = {
+    "s800": {
+        "key": "s800_sim",
+        "urdf": REPO / "assets_robot/engineai_S800/urdf/serial_s800.urdf",
+        "root": "LINK_BASE",
+    },
+    "g1": {
+        "key": "g1_sim",
+        "urdf": REPO / "assets_robot/g1_description/g1_29dof_rev_1_0.urdf",
+        "root": "pelvis",
+    },
+}
+
 
 
 def rpy_to_matrix(rpy: np.ndarray) -> np.ndarray:
@@ -64,13 +76,13 @@ def rpy_to_matrix(rpy: np.ndarray) -> np.ndarray:
     return rz @ ry @ rx
 
 
-def world_axes(urdf_path: Path) -> dict[str, np.ndarray]:
+def world_axes(urdf_path: Path, root_link: str) -> dict[str, np.ndarray]:
     """参考位形 q=0 下，各关节转轴在世界坐标系中的方向。"""
     root = ET.parse(urdf_path).getroot()
     joints: dict[str, dict] = {}
     for j in root.findall("joint"):
         origin = j.find("origin")
-        rpy = np.array([float(x) for x in (origin.get("rpy") or "0 0 0").split()])
+        rpy = np.array([float(x) for x in (origin.get("rpy") or "0 0 0").split()]) if origin is not None else np.zeros(3)
         ax = j.find("axis")
         axis = np.array([float(x) for x in ax.get("xyz").split()]) if ax is not None else np.array([0.0, 0.0, 1.0])
         joints[j.get("name")] = {
@@ -79,7 +91,6 @@ def world_axes(urdf_path: Path) -> dict[str, np.ndarray]:
             "rpy": rpy,
             "axis": axis,
         }
-
     children: dict[str, list[str]] = {}
     for name, d in joints.items():
         children.setdefault(d["parent"], []).append(name)
@@ -93,49 +104,69 @@ def world_axes(urdf_path: Path) -> dict[str, np.ndarray]:
             axes[joint_name] = rot_j @ d["axis"]
             walk(d["child"], rot_j)
 
-    walk("LINK_BASE", np.eye(3))
+    walk(root_link, np.eye(3))
     return axes
 
 
-def parse_collector(path: Path) -> tuple[list[float], list[float], list[float]]:
-    """从 data_collection.py 取出 directions / bias / scale（跳过注释行）。"""
-    src = "\n".join(l for l in path.read_text().split("\n") if not l.strip().startswith("#"))
+def split_side(name: str):
+    """'J00_HIP_PITCH_L' -> ('HIP_PITCH','L')；'left_hip_pitch_joint' -> ('hip_pitch_joint','L')"""
+    m = re.match(r"^J\d+_(.+)_([LR])$", name)
+    if m:
+        return m.group(1), m.group(2)
+    m = re.match(r"^(left|right)_(.+)$", name)
+    if m:
+        return m.group(2), ("L" if m.group(1) == "left" else "R")
+    return None, None
 
-    def grab(name: str) -> list[float]:
-        i = src.index(f"{name} = torch.tensor(")
-        j = src.index("device=", i)
-        body = src[i:j]
-        body = body[body.index("[") + 1 : body.rindex("]")]
-        body = re.sub(r"#.*", "", body)
-        return [float(x) for x in re.findall(r"[-+]?\d+\.?\d*", body)]
 
-    return grab("trajectory_directions"), grab("trajectory_bias"), grab("trajectory_scale")
+def parse_collector(robot_key: str):
+    """取该机器人的 directions / bias / scale（来自 robot_tables.py 的单一数据源）。
+
+    以前这里是 AST 解析 data_collection.py —— 表搬进 robot_tables.py 后直接读模块即可。
+    """
+    table = ROBOT_TABLES.get(robot_key)
+    if table is None:
+        raise SystemExit(f"✗ robot_tables.py 里没有 {robot_key}（可用：{sorted(ROBOT_TABLES)}）")
+    return table["directions"], table["bias"], table["scale"]
 
 
 def main() -> int:
-    axes = world_axes(URDF)
-    dirs, bias, scale = parse_collector(COLLECTOR)
+    ap = argparse.ArgumentParser(description="镜像对称校验")
+    ap.add_argument("--robot", default="s800", choices=sorted(ROBOTS))
+    args = ap.parse_args()
+    cfg = ROBOTS[args.robot]
+    JOINT_ORDER_LOCAL = JOINT_ORDER[cfg["key"]]
 
-    if not (len(dirs) == len(bias) == len(scale) == len(JOINT_ORDER)):
-        print(f"✗ 数组长度不匹配: dir={len(dirs)} bias={len(bias)} scale={len(scale)} 应为 {len(JOINT_ORDER)}")
+    axes = world_axes(cfg["urdf"], cfg["root"])
+    dirs, bias, scale = parse_collector(cfg["key"])
+
+    if not (len(dirs) == len(bias) == len(scale) == len(JOINT_ORDER_LOCAL)):
+        print(f"✗ 数组长度不匹配: dir={len(dirs)} bias={len(bias)} scale={len(scale)} 应为 {len(JOINT_ORDER_LOCAL)}")
         return 1
 
-    index = {n: i for i, n in enumerate(JOINT_ORDER)}
+    index = {n: i for i, n in enumerate(JOINT_ORDER_LOCAL)}
     pairs: dict[tuple[str, str], str] = {}
-    for name in JOINT_ORDER:
-        m = re.match(r"(J\d+)_(.+)_([LR])$", name)
-        if m:
-            pairs[(m.group(2), m.group(3))] = name
+    for name in JOINT_ORDER_LOCAL:
+        jtype, side = split_side(name)
+        if jtype:
+            pairs[(jtype, side)] = name
 
-    print(f"{'关节类型':18s} {'a_L 世界系':>22s} {'R·a_L':>22s} {'a_R 世界系':>22s} {'需要':>6s} {'实测':>6s} {'镜像':>6s}")
-    print("-" * 108)
+    print(f"[{args.robot}] 基座={cfg['root']}  关节 {len(JOINT_ORDER_LOCAL)} 个")
+    print(f"{'关节类型':22s} {'a_L 世界系':>22s} {'R·a_L':>22s} {'a_R 世界系':>22s} {'需要':>6s} {'实测':>6s} {'镜像':>6s}")
+    print("-" * 112)
 
     failures = []
+    n_pairs = 0
     # pairs 里 L / R 都是 key，只遍历 L 侧，否则同一类型会被处理两次（R 与自身比对必然失败）
     for (jtype, side), name_l in sorted(pairs.items()):
         if side != "L" or (jtype, "R") not in pairs:
             continue
+        n_pairs += 1
         name_r = pairs[(jtype, "R")]
+        if name_l not in axes or name_r not in axes:
+            print(f"{jtype:22s} ✗ URDF 里找不到 {name_l} / {name_r}")
+            failures.append(jtype)
+            continue
         a_l, a_r = axes[name_l], axes[name_r]
         mirror = MIRROR @ a_l
 
@@ -144,7 +175,7 @@ def main() -> int:
         elif np.allclose(a_r, -mirror, atol=2e-3):
             need = +1.0
         else:
-            print(f"{jtype:18s} ✗ 轴不满足镜像关系，无法判定（URDF 可能左右不对称）")
+            print(f"{jtype:22s} ✗ 轴不满足镜像关系，无法判定（URDF 可能左右不对称）")
             failures.append(jtype)
             continue
 
@@ -158,14 +189,14 @@ def main() -> int:
         if not ok:
             failures.append(jtype)
 
-        print(f"{jtype:18s} {str(np.round(a_l,3)):>22s} {str(np.round(mirror,3)):>22s} "
+        print(f"{jtype:22s} {str(np.round(a_l,3)):>22s} {str(np.round(mirror,3)):>22s} "
               f"{str(np.round(a_r,3)):>22s} {need:+6.0f} {dirs[i_r]:+6.0f} {'✓' if ok else '✗':>6s}")
 
     print()
     if failures:
         print(f"✗ 未通过镜像对称: {', '.join(failures)}")
         return 1
-    print("✓ 全部 13 对左右关节通过镜像对称校验")
+    print(f"✓ 全部 {n_pairs} 对左右关节通过镜像对称校验（--robot {args.robot}）")
     return 0
 
 

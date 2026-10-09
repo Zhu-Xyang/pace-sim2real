@@ -8,8 +8,11 @@
     L(s) = (kp + kd*s) / (I*s^2 + B*s) * exp(-s*T)
 
     I_total  下游连杆等效惯量 (frequency_damping_ratio_calculate.py)
-    B        关节粘性摩擦真值 (data_collection.py 注入的 damping)
-    T        指令延时 [s] = time_lag * sim.dt，data_collection.py 里 time_lag=5 @400Hz = 12.5ms
+    B        关节粘性摩擦真值 (robot_tables.py 注入的 damping)
+    T        延时 [s] = delay_gt × sim.dt。⚠️ 各机器人不同：
+             S800 delay_gt=5 步 @400Hz = 12.5ms（继承自 ANYmal 参考脚本，未实测）；
+             G1   delay_gt=2 步 @400Hz = 5ms。见 docs/延时设计说明.md 与 robot_tables.py。
+             本脚本的 DELAY_S 常量需按目标机器人改（下方 PLANT 目前也只有 S800）。
 
 相位裕度:
     PM = 180 + angle(L(j*wc))，其中 wc 为 |L|=1 的增益穿越频率
