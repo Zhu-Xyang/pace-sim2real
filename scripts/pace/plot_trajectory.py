@@ -169,7 +169,10 @@ GT_FRICTION = {
 # GT_VISCOUS = 0.5    # all joints
 # GT_FRICTION = 0.05   # all joints
 GT_BIAS = 0.05      # all joints
-GT_DELAY = 5        # sim steps
+# ⚠️ 必须与 data_collection.py 的 time_lag 一致，否则表里 Delay 那行的 Err% 是错的
+#    （静默错值，不报错）。这个常量是"手工真值表"的残留 —— 新采的数据在
+#    chirp_data.pt 里自带 "gt" 字段，以后应当优先读它。
+GT_DELAY = 3        # sim steps，@400Hz = 7.5ms（data_collection.py 的 time_lag 也是 3）
 
 if plot_table:
     num_joints = len(joint_order)

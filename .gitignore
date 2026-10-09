@@ -80,3 +80,8 @@ tests/
 
 # PACE specific
 **/data/*
+
+
+# g1 asset
+**/assets_robot/g1/*
+**/assets_robot/g1_description/*

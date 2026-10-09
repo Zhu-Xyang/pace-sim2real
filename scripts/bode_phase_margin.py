@@ -52,7 +52,7 @@ PLANT = {
     "WRIST_ROLL":     (0.0148, 0.1),
 }
 
-DELAY_S = 0.0125  # time_lag = 5 步 @ 400 Hz
+DELAY_S = 0.0075  # time_lag = 3 步 @ 400 Hz（须与 data_collection.py 的 time_lag 一致）
 
 SURF, INK, INK2, MUTED = "#fcfcfb", "#0b0b0b", "#52514e", "#a8a69e"
 S1, S2 = "#2a78d6", "#eb6834"  # 分类色板 slot 1 / 2

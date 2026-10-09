@@ -135,7 +135,7 @@ def main():
 
     bias = torch.tensor([0.05] * 27, device=env.unwrapped.device).unsqueeze(0)
 
-    time_lag = torch.tensor([[5]], dtype=torch.int, device=env.unwrapped.device)
+    time_lag = torch.tensor([[3]], dtype=torch.int, device=env.unwrapped.device)
 
     env.reset()
 
@@ -346,6 +346,21 @@ def main():
         "des_dof_pos": dof_target_pos_buffer.cpu(),
         "dof_vel": dof_vel_buffer.cpu(),
         "dof_torque": dof_torque_buffer.cpu(),
+        # ── 注入的真值（按 joint_order 排序），随数据一起落盘 ────────────────
+        # 用途：fit.py 的 --floor_test 需要它把 bounds 收缩到真值；plot_trajectory
+        # 出表时也应当优先用它，而不是 plot_trajectory.py 里手写的那份 GT 常量。
+        # 手工表一旦和注入值对不上，误差不会报错、只会静默显示成错值 —— 这个坑踩过：
+        # 26_09_29 那批数据是用旧增益采的，而拟合/出表用的是新增益，表现为几个关节的
+        # 摩擦差 30~100%。数据自带真值可以从根上避免"口径对不上"这类问题。
+        # 这里存的是「覆盖之后」的值（含 --uniform_gt 的影响）。
+        "gt": {
+            "joint_order": list(joint_order),
+            "armature": armature[0].detach().float().cpu(),
+            "damping": damping[0].detach().float().cpu(),
+            "friction": friction[0].detach().float().cpu(),
+            "bias": bias[0].detach().float().cpu(),
+            "delay": float(time_lag[0, 0].float().cpu()),
+        },
     }, data_dir / "chirp_data.pt")
 
     import matplotlib.pyplot as plt

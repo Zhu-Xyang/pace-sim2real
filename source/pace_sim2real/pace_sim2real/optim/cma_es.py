@@ -267,7 +267,13 @@ class CMAESOptimizer:
             comparison_matrix = (joint_ids.unsqueeze(1) == drive_indices.unsqueeze(0))
             drive_joint_idx = torch.argmax(comparison_matrix.int(), dim=0)
             articulation.actuators[drive_type].update_encoder_bias(self.sim_params[:, self.bias_idx][:, drive_joint_idx])
-            articulation.actuators[drive_type].update_time_lags(self.sim_params[:, self.delay_idx].to(torch.int))
+            # ⚠️ 必须 round 而不是直接 to(torch.int)（那是截断）：延时是整数，目标函数对
+            #    这个连续维是阶梯状的，截断会让「真值 N」落在格子边界上（θ∈[N,N+1) 才是 N），
+            #    于是初值/真值一有微小扰动就掉到 N-1。floor test 把 bounds 收缩到真值附近时
+            #    会因此劈成两半（G1 实测：一半样本延时差 1 步，损失差 9 个数量级）。
+            #    取整后真值落在格子中心 [N-0.5, N+0.5)，框收缩不跨界、搜索也不贴边界。
+            articulation.actuators[drive_type].update_time_lags(
+                torch.round(self.sim_params[:, self.delay_idx]).to(torch.int))
             articulation.actuators[drive_type].reset(env_ids)
 
     def _print_iteration(self):
