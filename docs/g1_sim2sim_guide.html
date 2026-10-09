@@ -1,0 +1,1175 @@
+<meta charset="utf-8">
+<title>G1 仿真对仿真验证手册</title>
+<meta name="description" content="在本机手动完成 PACE 的 Unitree G1 仿真对仿真验证，并逐项说明相对原仓库代码的改动。">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Condensed:wght@500;600&family=JetBrains+Mono:wght@400;600&family=Noto+Sans+SC:wght@400;500;700&display=swap">
+<style>
+:root {
+  --ground: #f2f5f4;
+  --surface: #ffffff;
+  --surface-2: #f8faf9;
+  --ink: #15201d;
+  --muted: #55645f;
+  --line: #d3dcd8;
+  --accent: #0b6b66;
+  --accent-ink: #ffffff;
+  --accent-soft: #e0efec;
+  --code-bg: #edf2f0;
+  --code-ink: #1d2a26;
+  --warn: #8a5300;
+  --warn-bg: #fff3dd;
+  --ok: #1c7443;
+  --ok-bg: #e4f3ea;
+  --bad: #a1302a;
+  --bad-bg: #fbe9e7;
+  --chart-lin: #b0612b;
+  --shadow: 0 1px 2px rgba(18, 38, 33, 0.06), 0 6px 18px rgba(18, 38, 33, 0.05);
+  --f-body: "Noto Sans SC", "PingFang SC", "Microsoft YaHei", "Source Han Sans SC", system-ui, sans-serif;
+  --f-label: "IBM Plex Sans Condensed", "Noto Sans SC", "Arial Narrow", system-ui, sans-serif;
+  --f-mono: "JetBrains Mono", ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --ground: #0e1312;
+    --surface: #151c1a;
+    --surface-2: #121816;
+    --ink: #dce5e1;
+    --muted: #92a29c;
+    --line: #2a3531;
+    --accent: #5cc3b8;
+    --accent-ink: #0c1716;
+    --accent-soft: #16302c;
+    --code-bg: #1a2320;
+    --code-ink: #d6e2dd;
+    --warn: #e6ab52;
+    --warn-bg: #2d2413;
+    --ok: #5fcb8d;
+    --ok-bg: #12281b;
+    --bad: #ee8176;
+    --bad-bg: #321a17;
+    --chart-lin: #e39a62;
+    --shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
+  }
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --ground: #0e1312;
+  --surface: #151c1a;
+  --surface-2: #121816;
+  --ink: #dce5e1;
+  --muted: #92a29c;
+  --line: #2a3531;
+  --accent: #5cc3b8;
+  --accent-ink: #0c1716;
+  --accent-soft: #16302c;
+  --code-bg: #1a2320;
+  --code-ink: #d6e2dd;
+  --warn: #e6ab52;
+  --warn-bg: #2d2413;
+  --ok: #5fcb8d;
+  --ok-bg: #12281b;
+  --bad: #ee8176;
+  --bad-bg: #321a17;
+  --chart-lin: #e39a62;
+  --shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
+}
+
+* { box-sizing: border-box; }
+html { scroll-behavior: smooth; }
+@media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
+body {
+  margin: 0;
+  background: var(--ground);
+  color: var(--ink);
+  font-family: var(--f-body);
+  font-size: 15.5px;
+  line-height: 1.75;
+  padding-inline: 20px;
+}
+a { color: var(--accent); text-underline-offset: 2px; }
+a:focus-visible, button:focus-visible, input:focus-visible, summary:focus-visible {
+  outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 4px;
+}
+code, pre, kbd { font-family: var(--f-mono); }
+p code, li code, td code, figcaption code, .note code {
+  font-size: 0.86em; background: var(--code-bg); color: var(--code-ink);
+  padding: 0.08em 0.36em; border-radius: 4px; overflow-wrap: anywhere;
+}
+
+.page { max-width: 1180px; margin: 0 auto; padding-block: 36px 80px; }
+.masthead { display: grid; gap: 14px; padding-bottom: 26px; border-bottom: 1px solid var(--line); }
+.eyebrow {
+  font-family: var(--f-label); font-weight: 600; font-size: 12.5px; letter-spacing: 0.12em;
+  text-transform: uppercase; color: var(--accent);
+}
+h1 { font-size: clamp(28px, 4.2vw, 40px); line-height: 1.25; margin: 0; font-weight: 700; text-wrap: balance; }
+.lede { margin: 0; max-width: 62ch; color: var(--muted); font-size: 16.5px; }
+.meta { display: flex; flex-wrap: wrap; gap: 8px 10px; margin: 4px 0 0; padding: 0; list-style: none; }
+.meta li {
+  font-family: var(--f-label); font-size: 13px; letter-spacing: 0.02em; color: var(--ink);
+  background: var(--surface); border: 1px solid var(--line); border-radius: 999px; padding: 3px 12px;
+}
+.meta li b { color: var(--muted); font-weight: 500; margin-right: 6px; }
+
+.layout { display: grid; grid-template-columns: 250px minmax(0, 1fr); gap: 44px; margin-top: 30px; align-items: start; }
+@media (max-width: 960px) { .layout { grid-template-columns: minmax(0, 1fr); gap: 20px; } }
+
+.toc {
+  position: sticky; top: calc(env(safe-area-inset-top, 0px) + 18px);
+  max-height: calc(100vh - 36px); overflow-y: auto;
+  font-size: 14px; padding-right: 6px;
+}
+@media (max-width: 960px) { .toc { position: static; max-height: none; background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; } }
+.toc h2 { font-family: var(--f-label); font-size: 12.5px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--muted); margin: 0 0 8px; }
+.toc ol, .toc ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; }
+.toc a { display: flex; gap: 8px; align-items: baseline; color: var(--ink); text-decoration: none; padding: 3px 8px; border-radius: 6px; }
+.toc a:hover { background: var(--accent-soft); }
+.toc .num { font-family: var(--f-label); color: var(--muted); min-width: 1.6em; font-variant-numeric: tabular-nums; }
+.toc .done .num { color: var(--ok); }
+.toc .done a { color: var(--muted); }
+.toc .group { margin-top: 12px; font-family: var(--f-label); font-size: 12px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--muted); padding-left: 8px; }
+.progress { margin: 0 0 14px; }
+.progress-bar { height: 6px; background: var(--line); border-radius: 999px; overflow: hidden; }
+.progress-bar span { display: block; height: 100%; width: 0; background: var(--ok); transition: width 0.25s ease; }
+.progress-text { font-family: var(--f-label); font-size: 12.5px; color: var(--muted); margin-top: 5px; font-variant-numeric: tabular-nums; }
+
+main { min-width: 0; display: grid; gap: 44px; }
+.chapter { display: grid; gap: 20px; }
+.chapter > h2 {
+  font-size: 24px; line-height: 1.35; margin: 0; padding-top: 6px; font-weight: 700; text-wrap: balance;
+  scroll-margin-top: 20px;
+}
+.chapter > h2 .kicker { display: block; font-family: var(--f-label); font-size: 12.5px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--accent); font-weight: 600; margin-bottom: 2px; }
+.chapter > p, .prose p { margin: 0; max-width: 70ch; }
+.prose { display: grid; gap: 12px; }
+h3 { font-size: 18px; margin: 0; line-height: 1.4; text-wrap: balance; }
+h4 { font-size: 15px; margin: 0; font-weight: 700; }
+ul.plain, ol.plain { margin: 0; padding-left: 1.3em; display: grid; gap: 4px; max-width: 72ch; }
+
+/* steps */
+.step {
+  background: var(--surface); border: 1px solid var(--line); border-radius: 12px;
+  box-shadow: var(--shadow); padding: 22px 24px; display: grid; gap: 16px; scroll-margin-top: 18px;
+}
+@media (max-width: 560px) { .step { padding: 18px 16px; } }
+.step.is-done { border-color: color-mix(in srgb, var(--ok) 45%, var(--line)); }
+.step-head { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 14px; }
+.step-no {
+  font-family: var(--f-label); font-weight: 600; font-size: 13px; letter-spacing: 0.06em;
+  color: var(--accent-ink); background: var(--accent); border-radius: 6px; padding: 2px 9px;
+  font-variant-numeric: tabular-nums;
+}
+.step-head h3 { flex: 1 1 260px; }
+.chip { font-family: var(--f-label); font-size: 12.5px; color: var(--muted); border: 1px solid var(--line); border-radius: 999px; padding: 1px 10px; white-space: nowrap; }
+.done-toggle { display: inline-flex; align-items: center; gap: 6px; font-size: 13.5px; color: var(--muted); cursor: pointer; user-select: none; }
+.done-toggle input { width: 16px; height: 16px; accent-color: var(--ok); cursor: pointer; }
+.step-body { display: grid; gap: 14px; }
+.label { font-family: var(--f-label); font-size: 12.5px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--muted); font-weight: 600; margin: 0 0 6px; }
+
+.cmd { position: relative; }
+.cmd pre, pre.out {
+  margin: 0; padding: 14px 16px; border-radius: 9px; overflow-x: auto;
+  font-size: 13.2px; line-height: 1.6; tab-size: 4;
+}
+.cmd pre { background: var(--code-bg); color: var(--code-ink); border: 1px solid var(--line); padding-right: 76px; }
+pre.out { background: var(--surface-2); color: var(--muted); border: 1px dashed var(--line); }
+pre.out .hl { color: var(--ink); font-weight: 600; }
+.copy {
+  position: absolute; top: 8px; right: 8px; font-family: var(--f-label); font-size: 12.5px;
+  border: 1px solid var(--line); background: var(--surface); color: var(--ink); border-radius: 6px;
+  padding: 2px 10px; cursor: pointer;
+}
+.copy:hover { border-color: var(--accent); color: var(--accent); }
+.copy.ok { color: var(--ok); border-color: var(--ok); }
+
+.checks { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.checks li { position: relative; padding-left: 26px; max-width: 72ch; }
+.checks li::before {
+  content: ""; position: absolute; left: 2px; top: 0.55em; width: 12px; height: 7px;
+  border-left: 2.5px solid var(--ok); border-bottom: 2.5px solid var(--ok); transform: rotate(-45deg);
+}
+.note { border-radius: 9px; padding: 11px 14px; font-size: 14.5px; max-width: 76ch; }
+.note.warn { background: var(--warn-bg); color: var(--ink); border: 1px solid color-mix(in srgb, var(--warn) 35%, transparent); }
+.note.warn strong { color: var(--warn); }
+.note.info { background: var(--accent-soft); color: var(--ink); }
+.note.bad { background: var(--bad-bg); color: var(--ink); border: 1px solid color-mix(in srgb, var(--bad) 30%, transparent); }
+.note.bad strong { color: var(--bad); }
+
+/* tables */
+.table-wrap { overflow-x: auto; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); }
+table { border-collapse: collapse; width: 100%; font-size: 14px; }
+th, td { text-align: left; padding: 9px 12px; border-bottom: 1px solid var(--line); vertical-align: top; }
+th { font-family: var(--f-label); font-weight: 600; font-size: 12.5px; letter-spacing: 0.06em; color: var(--muted); background: var(--surface-2); white-space: nowrap; }
+tr:last-child td { border-bottom: 0; }
+td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+td code { white-space: nowrap; }
+.tag { font-family: var(--f-label); font-size: 12px; padding: 1px 8px; border-radius: 999px; white-space: nowrap; }
+.tag.new { color: var(--ok); background: var(--ok-bg); }
+.tag.mod { color: var(--warn); background: var(--warn-bg); }
+.tag.same { color: var(--muted); background: var(--surface-2); border: 1px solid var(--line); }
+.pass { color: var(--ok); font-weight: 600; }
+.fail { color: var(--bad); font-weight: 600; }
+
+/* figures */
+figure { margin: 0; background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 16px 16px 12px; display: grid; gap: 10px; }
+figure .scroll { overflow-x: auto; }
+figure svg { display: block; width: 100%; height: auto; min-width: 560px; color: var(--ink); }
+figcaption { font-size: 13.5px; color: var(--muted); max-width: 80ch; }
+svg text { font-family: var(--f-body); font-size: 12.5px; fill: currentColor; }
+svg .small { font-size: 11px; fill: var(--muted); }
+svg .mono { font-family: var(--f-mono); font-size: 11px; }
+svg .box { fill: var(--surface-2); stroke: currentColor; stroke-width: 1.2; }
+svg .box-accent { fill: var(--accent-soft); stroke: var(--accent); stroke-width: 1.8; }
+svg .edge { stroke: currentColor; stroke-width: 1.3; fill: none; }
+svg .edge-accent { stroke: var(--accent); stroke-width: 1.6; fill: none; }
+svg .edge-dash { stroke: var(--muted); stroke-width: 1.2; fill: none; stroke-dasharray: 5 4; }
+svg .head { fill: currentColor; }
+svg .head-accent { fill: var(--accent); }
+svg .head-muted { fill: var(--muted); }
+svg .accent-text { fill: var(--accent); font-weight: 700; }
+svg .row-title { font-weight: 700; font-size: 13px; }
+/* chart */
+.chart .grid { stroke: var(--line); stroke-width: 1; }
+.chart .axis { stroke: var(--muted); stroke-width: 1; }
+.chart .tick { font-size: 11px; fill: var(--muted); font-variant-numeric: tabular-nums; }
+.chart .gate { stroke: var(--ok); stroke-width: 1.2; stroke-dasharray: 6 4; }
+.chart .gatelab { font-size: 11px; fill: var(--ok); }
+.chart .line-log { fill: none; stroke: var(--accent); stroke-width: 2.2; stroke-linejoin: round; }
+.chart .line-lin { fill: none; stroke: var(--chart-lin); stroke-width: 2.2; stroke-linejoin: round; }
+.chart .dot-log { fill: var(--accent); }
+.chart .dot-lin { fill: var(--chart-lin); }
+.chart .lab-log { font-size: 11.5px; fill: var(--accent); font-weight: 600; }
+.chart .lab-lin { font-size: 11.5px; fill: var(--chart-lin); font-weight: 600; }
+
+/* change cards */
+.change { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 18px 20px; display: grid; gap: 12px; }
+.change h3 { font-size: 16.5px; }
+.change .where { font-family: var(--f-mono); font-size: 12.5px; color: var(--muted); overflow-wrap: anywhere; }
+.compare { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 12px; }
+@media (max-width: 720px) { .compare { grid-template-columns: minmax(0, 1fr); } }
+.compare > div { border-radius: 9px; padding: 11px 13px; display: grid; gap: 6px; align-content: start; font-size: 14.5px; }
+.compare .before { background: var(--surface-2); border: 1px solid var(--line); }
+.compare .after { background: var(--accent-soft); border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent); }
+.compare .tagline { font-family: var(--f-label); font-size: 12px; letter-spacing: 0.1em; text-transform: uppercase; font-weight: 600; color: var(--muted); }
+.compare .after .tagline { color: var(--accent); }
+.compare pre { margin: 0; font-size: 12.3px; line-height: 1.55; background: var(--code-bg); color: var(--code-ink); border-radius: 7px; padding: 9px 11px; overflow-x: auto; }
+.why { font-size: 14.5px; max-width: 78ch; margin: 0; }
+.why b { color: var(--accent); }
+
+details { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 10px 14px; }
+details summary { cursor: pointer; font-weight: 600; }
+details[open] summary { margin-bottom: 8px; }
+
+.split { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 12px; }
+.fact { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; display: grid; gap: 4px; }
+.fact .k { font-family: var(--f-label); font-size: 12.5px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
+.fact .v { font-size: 15px; }
+
+footer { margin-top: 56px; padding-top: 18px; border-top: 1px solid var(--line); color: var(--muted); font-size: 13.5px; display: grid; gap: 4px; }
+</style>
+
+<div class="page">
+  <header class="masthead">
+    <div class="eyebrow">PACE · Unitree G1 29-DoF · 操作手册</div>
+    <h1>G1 仿真对仿真验证手册</h1>
+    <p class="lede">在本机从零手动跑一遍 G1 的 PACE 辨识闭环：仿真里造一台参数已知的“真机”，采集 chirp 数据，用 CMA-ES 把参数辨识回来，再和真值逐项核对。最后一章逐条说明相对原仓库代码改了哪里、为什么改。</p>
+    <ul class="meta">
+      <li><b>分支</b>g1-sim2sim（工作区改动，未提交）</li>
+      <li><b>环境</b>conda sonic · Isaac Sim 5.1 · Isaac Lab 2.3.2</li>
+      <li><b>GPU</b>RTX 5080 16 GB</li>
+      <li><b>总耗时</b>约 2 小时，其中拟合约 1.5 小时</li>
+    </ul>
+  </header>
+
+  <div class="layout">
+    <nav class="toc" aria-label="目录">
+      <div class="progress">
+        <div class="progress-bar" aria-hidden="true"><span id="progress-fill"></span></div>
+        <div class="progress-text" id="progress-text">已完成 0 / 9 步</div>
+      </div>
+      <h2>目录</h2>
+      <ul>
+        <li><a href="#overview"><span class="num">·</span>先看全局</a></li>
+      </ul>
+      <div class="group">准备</div>
+      <ol>
+        <li data-step="1"><a href="#s1"><span class="num">1</span>切到分支并核对改动</a></li>
+        <li data-step="2"><a href="#s2"><span class="num">2</span>准备 Python 环境</a></li>
+        <li data-step="3"><a href="#s3"><span class="num">3</span>设置环境变量</a></li>
+      </ol>
+      <div class="group">验证</div>
+      <ol>
+        <li data-step="4"><a href="#s4"><span class="num">4</span>冒烟测试</a></li>
+        <li data-step="5"><a href="#s5"><span class="num">5</span>生成仿真数据</a></li>
+        <li data-step="6"><a href="#s6"><span class="num">6</span>检查数据</a></li>
+        <li data-step="7"><a href="#s7"><span class="num">7</span>一致性检查</a></li>
+        <li data-step="8"><a href="#s8"><span class="num">8</span>正式拟合</a></li>
+        <li data-step="9"><a href="#s9"><span class="num">9</span>评估与判定</a></li>
+      </ol>
+      <div class="group">参考</div>
+      <ul>
+        <li><a href="#extend"><span class="num">+</span>扩展验证</a></li>
+        <li><a href="#faq"><span class="num">?</span>常见问题</a></li>
+        <li><a href="#changes"><span class="num">Δ</span>相对原代码的改动</a></li>
+        <li><a href="#files"><span class="num">≡</span>输出文件速查</a></li>
+        <li><a href="#next"><span class="num">→</span>上真机前</a></li>
+      </ul>
+    </nav>
+
+    <main>
+      <!-- OVERVIEW -->
+      <section class="chapter" id="overview">
+        <h2><span class="kicker">全局</span>sim-to-sim 在验证什么</h2>
+        <p>真机辨识只能看轨迹对不对得上，永远不知道辨识出的参数是不是真值。sim-to-sim 把“真机”换成一台参数由我们自己设定的仿真 G1，于是答案在手里：流程有 bug、参数不可辨识、优化器卡住，都会直接暴露成“恢复出的参数和真值对不上”。这一关过了，再上真机时出现的偏差才能归因到真机本身。</p>
+        <figure>
+          <div class="scroll">
+            <svg viewBox="0 0 780 250" role="img" aria-label="流程：data_collection_g1.py 写入真值并回放 chirp，生成 29 列数据文件；fit_g1.py 用 4096 个环境逐代写参数、回放、打分、更新分布，输出 mean 和 probe 检查点；eval_g1_sim2sim.py 读取检查点和真值文件给出 PASS 或 FAIL。">
+              <defs>
+                <marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="head"/></marker>
+                <marker id="ahm" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="head-muted"/></marker>
+                <marker id="aha" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="head-accent"/></marker>
+              </defs>
+              <!-- box 1 -->
+              <rect x="10" y="70" width="200" height="92" rx="9" class="box"/>
+              <text x="110" y="96" text-anchor="middle" class="row-title">data_collection_g1.py</text>
+              <text x="110" y="118" text-anchor="middle">1 个环境，写入真值</text>
+              <text x="110" y="138" text-anchor="middle">回放 chirp，记录编码器读数</text>
+              <text x="110" y="154" text-anchor="middle" class="small">约 1 分钟</text>
+              <!-- box 2 -->
+              <rect x="290" y="70" width="210" height="92" rx="9" class="box-accent"/>
+              <text x="395" y="96" text-anchor="middle" class="row-title">fit_g1.py</text>
+              <text x="395" y="118" text-anchor="middle">4096 个环境：env 0 = 均值探针</text>
+              <text x="395" y="138" text-anchor="middle">其余 4095 个 = CMA-ES 样本</text>
+              <text x="395" y="154" text-anchor="middle" class="small">约 90 秒 / 代</text>
+              <!-- loop -->
+              <path d="M335,70 C335,24 455,24 455,70" class="edge-accent" marker-end="url(#aha)"/>
+              <text x="395" y="20" text-anchor="middle" class="accent-text">每代：写参数 → 回放 → 打分 → 更新分布</text>
+              <!-- box 3 -->
+              <rect x="580" y="70" width="190" height="92" rx="9" class="box"/>
+              <text x="675" y="96" text-anchor="middle" class="row-title">eval_g1_sim2sim.py</text>
+              <text x="675" y="118" text-anchor="middle">逐关节对比真值</text>
+              <text x="675" y="138" text-anchor="middle">给出 PASS / FAIL</text>
+              <text x="675" y="154" text-anchor="middle" class="small">不需要仿真器</text>
+              <!-- edges -->
+              <line x1="210" y1="116" x2="286" y2="116" class="edge" marker-end="url(#ah)"/>
+              <text x="248" y="108" text-anchor="middle" class="small">数据 .pt</text>
+              <text x="248" y="134" text-anchor="middle" class="small">29 列 × 11000 行</text>
+              <line x1="500" y1="116" x2="576" y2="116" class="edge" marker-end="url(#ah)"/>
+              <text x="538" y="108" text-anchor="middle" class="small">mean_XXX.pt</text>
+              <text x="538" y="134" text-anchor="middle" class="small">probe_XXX.pt</text>
+              <path d="M110,162 L110,218 L675,218 L675,166" class="edge-dash" marker-end="url(#ahm)"/>
+              <text x="392" y="236" text-anchor="middle" class="small">_truth.pt：真值只给评估用，拟合看不到</text>
+            </svg>
+          </div>
+          <figcaption>图 1　三个脚本串成一条流水线。拟合只看得到数据文件；真值文件单独交给评估脚本，保证测试是“盲”的。</figcaption>
+        </figure>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>步骤</th><th>做什么</th><th class="num">耗时</th><th>要 GPU</th></tr></thead>
+            <tbody>
+              <tr><td>1–3</td><td>分支、环境、环境变量</td><td class="num">10 分钟</td><td>否</td></tr>
+              <tr><td>4</td><td>冒烟测试：4 秒的短采集</td><td class="num">1 分钟</td><td>是</td></tr>
+              <tr><td>5–6</td><td>生成腿部数据并检查</td><td class="num">2 分钟</td><td>是</td></tr>
+              <tr><td>7</td><td>一致性检查：真值原样放进 4096 个环境</td><td class="num">2 分钟</td><td>是</td></tr>
+              <tr><td>8</td><td>正式拟合，到 A 档通过为止</td><td class="num">约 90 分钟</td><td>是</td></tr>
+              <tr><td>9</td><td>评估与判定</td><td class="num">1 分钟</td><td>否</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <!-- PREP -->
+      <section class="chapter" id="prep">
+        <h2><span class="kicker">准备</span>把代码和环境对齐</h2>
+
+        <article class="step" id="s1" data-step="1">
+          <div class="step-head"><span class="step-no">步骤 1</span><h3>切到分支并核对改动</h3><span class="chip">2 分钟</span><label class="done-toggle"><input type="checkbox" id="done-1" data-step="1"> 已完成</label></div>
+          <div class="step-body">
+            <p>所有 G1 代码都在 <code>g1-sim2sim</code> 分支的工作区里，还没有提交。先确认看到的改动和下面一致，原仓库文件没有被动过。</p>
+            <div class="cmd"><pre><code>cd ~/Code_prj/pace-sim2real
+git switch g1-sim2sim
+git status --short
+git diff --stat HEAD</code></pre><button class="copy" type="button">复制</button></div>
+            <div><p class="label">预期输出</p>
+<pre class="out"> M mkdocs.yml
+ M source/pace_sim2real/pace_sim2real/optim/__init__.py
+ M source/pace_sim2real/pace_sim2real/tasks/manager_based/__init__.py
+ M source/pace_sim2real/pace_sim2real/utils/__init__.py
+?? docs/examples/g1.md
+?? docs/examples/g1_sim2sim_guide.html
+?? scripts/pace/data_collection_g1.py
+?? scripts/pace/eval_g1_sim2sim.py
+?? scripts/pace/fit_g1.py
+?? source/pace_sim2real/pace_sim2real/optim/cma_es_lite.py
+?? source/pace_sim2real/pace_sim2real/tasks/manager_based/pace/g1_pace_env_cfg.py
+?? source/pace_sim2real/pace_sim2real/utils/pace_actuator_cmd_delay.py
+?? source/pace_sim2real/pace_sim2real/utils/pace_actuator_cmd_delay_cfg.py</pre></div>
+            <div><p class="label">判断标准</p>
+              <ul class="checks">
+                <li>只有 4 个已跟踪文件是 <code>M</code>，<code>git diff --stat HEAD</code> 的最后一行是 <code>4 files changed, 22 insertions(+), 1 deletion(-)</code>。唯一删掉的一行是 <code>optim/__init__.py</code> 里的 <code>__all__</code>，它被改写成包含原有名字的更长列表。</li>
+                <li><code>git switch</code> 会先打印 <code>Already on 'g1-sim2sim'</code> 和 4 行 <code>M</code>，属于正常。</li>
+                <li><code>fit.py</code>、<code>data_collection.py</code>、<code>cma_es.py</code>、<code>pace_actuator.py</code>、<code>anymal_pace_env_cfg.py</code> 不在列表里，说明 ANYmal 流程原封未动。</li>
+              </ul>
+            </div>
+          </div>
+        </article>
+
+        <article class="step" id="s2" data-step="2">
+          <div class="step-head"><span class="step-no">步骤 2</span><h3>准备 Python 环境</h3><span class="chip">5 分钟</span><label class="done-toggle"><input type="checkbox" id="done-2" data-step="2"> 已完成</label></div>
+          <div class="step-body">
+            <p>能跑 Isaac Sim 的是 <code>sonic</code> 环境。<code>env_isaacsim5.1</code> 缺 isaacsim 和 torch，用不了。<code>sonic</code> 里还缺两个包：<code>cmaes</code> 和本仓库的 <code>pace_sim2real</code>。</p>
+            <div class="cmd"><pre><code>conda activate sonic
+python --version                  # 应为 3.11.x
+python -m pip list 2>/dev/null | grep -iE "^(isaacsim|isaaclab|torch) "</code></pre><button class="copy" type="button">复制</button></div>
+            <div><p class="label">预期输出</p>
+<pre class="out">Python 3.11.15
+isaaclab                   0.54.2             /home/…/IsaacLab/source/isaaclab
+isaacsim                   5.1.0.0
+torch                      2.7.0+cu128</pre></div>
+            <p>然后二选一装依赖。方案 A 最省事；方案 B 不往 <code>sonic</code> 里写任何东西，适合这个环境还被别的项目共用的情况。</p>
+            <h4>方案 A：直接安装到 sonic</h4>
+            <div class="cmd"><pre><code>python -m pip install cmaes
+python -m pip install -e source/pace_sim2real</code></pre><button class="copy" type="button">复制</button></div>
+            <h4>方案 B：不改环境，用 PYTHONPATH</h4>
+            <div class="cmd"><pre><code>python -m pip install --target ~/.local/pace_deps cmaes
+export PYTHONPATH=$HOME/Code_prj/pace-sim2real/source/pace_sim2real:$HOME/.local/pace_deps:$PYTHONPATH</code></pre><button class="copy" type="button">复制</button></div>
+            <p>方案 B 的 <code>export</code> 只对当前终端有效，之后每开一个新终端都要重新执行。</p>
+            <div class="cmd"><pre><code>python -c "import cmaes; print('cmaes', cmaes.__version__)"
+python scripts/pace/fit_g1.py --help | head -3</code></pre><button class="copy" type="button">复制</button></div>
+            <div><p class="label">判断标准</p>
+              <ul class="checks">
+                <li>第一行打印 <code>cmaes 0.x</code>，不报 <code>ModuleNotFoundError</code>。</li>
+                <li><code>--help</code> 在一秒内返回用法说明。它不会启动 Isaac Sim，只检查脚本能被解析。</li>
+              </ul>
+            </div>
+            <p class="note warn"><strong>注意</strong>　不要在这里用 <code>python -c "import pace_sim2real"</code> 做检查。这个包导入时会加载 Isaac Lab 的环境模块，必须先由脚本启动 Isaac Sim，直接导入会报 <code>No module named 'omni'</code>，这不代表安装失败。</p>
+          </div>
+        </article>
+
+        <article class="step" id="s3" data-step="3">
+          <div class="step-head"><span class="step-no">步骤 3</span><h3>设置环境变量</h3><span class="chip">1 分钟</span><label class="done-toggle"><input type="checkbox" id="done-3" data-step="3"> 已完成</label></div>
+          <div class="step-body">
+            <p>两个变量每个终端都要设。第二个尤其重要：Isaac Sim 退出时会直接结束进程，输出重定向到文件时缓冲区里的打印会全部丢失。</p>
+            <div class="cmd"><pre><code>export OMNI_KIT_ACCEPT_EULA=YES     # 首次启动时不再交互确认许可
+export PYTHONUNBUFFERED=1           # 等价于每次都加 python -u
+ls -l $HOME/Code_prj/whole_body_tracking/source/whole_body_tracking/whole_body_tracking/assets/unitree_description/urdf/g1/main.urdf</code></pre><button class="copy" type="button">复制</button></div>
+            <div><p class="label">判断标准</p>
+              <ul class="checks">
+                <li><code>ls</code> 能列出 <code>main.urdf</code>，大小约 40 KB。这是 29 自由度 rev 1.0 模型，质量惯量参数和 Unitree 官方文件一致。</li>
+                <li>如果你的 URDF 放在别处，设置 <code>export G1_URDF_PATH=/你的/路径/g1.urdf</code>，辨识和以后的训练必须用同一份。</li>
+              </ul>
+            </div>
+          </div>
+        </article>
+      </section>
+
+      <!-- RUN -->
+      <section class="chapter" id="run">
+        <h2><span class="kicker">验证</span>采集、自检、拟合、判定</h2>
+        <p>以下命令都在仓库根目录 <code>~/Code_prj/pace-sim2real</code> 下、已激活 <code>sonic</code> 的终端里执行。</p>
+
+        <article class="step" id="s4" data-step="4">
+          <div class="step-head"><span class="step-no">步骤 4</span><h3>冒烟测试：4 秒的短采集</h3><span class="chip">1 分钟</span><label class="done-toggle"><input type="checkbox" id="done-4" data-step="4"> 已完成</label></div>
+          <div class="step-body">
+            <p>先用一段只有 4 秒的激励确认 Isaac Sim 能启动、URDF 能导入、执行器和增益加载正确。输出写到单独的文件，测完删掉。</p>
+            <div class="cmd"><pre><code>python -u scripts/pace/data_collection_g1.py --headless --group legs \
+    --duration 3 --hold 0.5 --tail 0.5 --fade 0.5 --out g1_29dof/_smoke.pt 2>&amp;1 | grep -E "^\[INFO\] (sim|track|saved)|Error|Traceback"</code></pre><button class="copy" type="button">复制</button></div>
+            <div><p class="label">预期输出</p>
+<pre class="out"><span class="hl">[INFO] sim-to-sim G1: legs, excited 12 joints, T = 2000 steps @ 0.002 s (4.0 s), actuator ['PaceDCMotorCmdDelay'], truth delay 3 steps</span>
+[INFO] tracking |q - q_hat| on excited joints: rms 0.1353 rad, max 0.6059 rad
+[INFO] saved .../data/g1_29dof/_smoke.pt (+ _truth.pt)</pre></div>
+            <div><p class="label">判断标准</p>
+              <ul class="checks">
+                <li>第一行 <code>T = 2000 steps @ 0.002 s</code>：0.5 + 3 + 0.5 秒，每步 2 ms。</li>
+                <li>执行器类名是 <code>PaceDCMotorCmdDelay</code>，也就是新的指令延迟执行器。</li>
+                <li>没有 <code>Traceback</code>。注意脚本出错时进程退出码仍然是 0，要看输出，不能看 <code>$?</code>。</li>
+              </ul>
+            </div>
+            <div class="cmd"><pre><code>rm data/g1_29dof/_smoke.pt data/g1_29dof/_smoke_truth.pt</code></pre><button class="copy" type="button">复制</button></div>
+          </div>
+        </article>
+
+        <article class="step" id="s5" data-step="5">
+          <div class="step-head"><span class="step-no">步骤 5</span><h3>生成腿部的仿真数据</h3><span class="chip">1 分钟</span><label class="done-toggle"><input type="checkbox" id="done-5" data-step="5"> 已完成</label></div>
+          <div class="step-body">
+            <p>这一步让一台 G1 扮演真机：按随机种子为每个关节抽一组真值，写进仿真，然后只激励双腿 12 个关节，腰和手臂停在中心姿态。</p>
+            <div class="cmd"><pre><code>python -u scripts/pace/data_collection_g1.py --headless --group legs --truth_seed 0 \
+    2>&amp;1 | grep -E "^\[INFO\] (sim|track|saved)|Error|Traceback"</code></pre><button class="copy" type="button">复制</button></div>
+            <div><p class="label">预期输出</p>
+<pre class="out"><span class="hl">[INFO] sim-to-sim G1: legs, excited 12 joints, T = 11000 steps @ 0.002 s (22.0 s), actuator ['PaceDCMotorCmdDelay'], truth delay 3 steps</span>
+[INFO] tracking |q - q_hat| on excited joints: rms 0.1534 rad, max 0.5905 rad
+[INFO] saved .../data/g1_29dof/g1_sim_legs_seed0.pt (+ _truth.pt)</pre></div>
+            <div class="table-wrap"><table>
+              <thead><tr><th>这段激励怎么构成</th><th>取值</th></tr></thead>
+              <tbody>
+                <tr><td>时间结构</td><td>静止 1 秒 → 线性 chirp 20 秒 → 静止 1 秒，余弦淡入淡出各 2 秒</td></tr>
+                <tr><td>频率</td><td>0.1 Hz 扫到 <code>--f1</code> 和关节上限中较小的一个。默认 <code>--f1</code> 是 3 Hz，所以腿部 12 个关节都扫到 3 Hz；踝的上限 4 Hz 只在调高 <code>--f1</code> 时起作用</td></tr>
+                <tr><td>幅值</td><td>髋 pitch 0.275、髋 roll 0.20、髋 yaw 0.30、膝 0.35、踝 pitch 0.25、踝 roll 0.12 rad</td></tr>
+                <tr><td>真值范围</td><td>armature 0.5–3 倍先验；阻尼取搜索框的 10–90%；摩擦 0.3–1.2 倍先验；零偏 ±0.03 rad；延迟 3 步</td></tr>
+              </tbody>
+            </table></div>
+            <div><p class="label">判断标准</p>
+              <ul class="checks">
+                <li><code>T = 11000 steps @ 0.002 s</code>，真值延迟 3 步。</li>
+                <li>跟踪误差 RMS 在 0.15 rad 左右是正常的：增益很低，而且有 3 步延迟。</li>
+                <li>同一个 <code>--truth_seed</code> 每次生成的文件完全一样，可以和上面的数字逐位对照。</li>
+              </ul>
+            </div>
+          </div>
+        </article>
+
+        <article class="step" id="s6" data-step="6">
+          <div class="step-head"><span class="step-no">步骤 6</span><h3>检查数据有没有“卡死”的关节</h3><span class="chip">1 分钟</span><label class="done-toggle"><input type="checkbox" id="done-6" data-step="6"> 已完成</label></div>
+          <div class="step-body">
+            <p>G1 的 PD 增益很低，如果某个关节的静摩擦大到指令推不动它，这个关节的惯量和阻尼就辨识不出来。下面这段脚本不需要 Isaac Sim，直接比较每个被激励关节的指令峰峰值和实际响应峰峰值。</p>
+            <div class="cmd"><pre><code>python - &lt;&lt;'EOF'
+import torch
+d = torch.load("data/g1_29dof/g1_sim_legs_seed0.pt", weights_only=False)
+t, q, qh, names = d["time"], d["dof_pos"], d["des_dof_pos"], d["joint_names"]
+print("rows", q.shape[0], "cols", q.shape[1], "dt", round(float(t[1] - t[0]), 6),
+      "excited", len(d["excited"]), "truth delay", d["truth"]["delay_steps"])
+for j in d["excited"]:
+    i = names.index(j)
+    cmd = float(qh[:, i].max() - qh[:, i].min()); resp = float(q[:, i].max() - q[:, i].min())
+    print(f"{j:26s} cmd {cmd:.3f}  resp {resp:.3f}  ratio {resp / cmd:.2f}")
+EOF</code></pre><button class="copy" type="button">复制</button></div>
+            <div><p class="label">预期输出</p>
+<pre class="out" id="s6-out"><span class="hl">rows 11000 cols 29 dt 0.002 excited 12 truth delay 3</span>
+left_hip_pitch_joint       cmd 0.550  resp 0.664  ratio 1.21
+left_hip_roll_joint        cmd 0.400  resp 0.330  ratio 0.82
+left_hip_yaw_joint         cmd 0.600  resp 0.523  ratio 0.87
+left_knee_joint            cmd 0.700  resp 0.629  ratio 0.90
+left_ankle_pitch_joint     cmd 0.500  resp 0.421  ratio 0.84
+left_ankle_roll_joint      cmd 0.240  resp 0.164  ratio 0.68
+right_hip_pitch_joint      cmd 0.550  resp 0.605  ratio 1.10
+right_hip_roll_joint       cmd 0.400  resp 0.343  ratio 0.86
+right_hip_yaw_joint        cmd 0.600  resp 0.549  ratio 0.92
+right_knee_joint           cmd 0.700  resp 0.584  ratio 0.83
+right_ankle_pitch_joint    cmd 0.500  resp 0.408  ratio 0.82
+right_ankle_roll_joint     cmd 0.240  resp 0.142  ratio 0.59</pre></div>
+            <div><p class="label">判断标准</p>
+              <ul class="checks">
+                <li>29 列、步长 0.002、12 个被激励关节。</li>
+                <li>每个关节的 <code>ratio</code> 都大于 0.3。本机实测在 0.59 到 1.21 之间：髋 pitch 大于 1 是共振放大，属于正常现象；踝 roll 最小，因为幅值只有 0.12 rad。</li>
+              </ul>
+            </div>
+            <p class="note warn"><strong>如果某个关节 ratio 小于 0.3</strong>　说明它被摩擦卡住了。换一个 <code>--truth_seed</code> 重新生成，或者把 <code>--amp_scale</code> 调大到 1.2 左右。</p>
+          </div>
+        </article>
+
+        <article class="step" id="s7" data-step="7">
+          <div class="step-head"><span class="step-no">步骤 7</span><h3>一致性检查：把真值原样交给拟合</h3><span class="chip">2 分钟</span><label class="done-toggle"><input type="checkbox" id="done-7" data-step="7"> 已完成</label></div>
+          <div class="step-body">
+            <p>这是最重要的一步。<code>--floor_test</code> 把所有参数的搜索范围收窄到真值本身，只跑一代。如果采集和拟合在时间对齐、零偏、延迟、初始状态上完全一致，4096 个环境算出来的损失应该接近浮点精度的零。</p>
+            <div class="cmd"><pre><code>python -u scripts/pace/fit_g1.py --task Isaac-Pace-G1-Legs-v0 --headless --num_envs 4096 \
+    --data g1_29dof/g1_sim_legs_seed0.pt --floor_test \
+    2>&amp;1 | grep -E "floor test|data columns|initialized|^\[it |Error|Traceback"</code></pre><button class="copy" type="button">复制</button></div>
+            <div><p class="label">预期输出</p>
+<pre class="out">[INFO] floor test: bounds collapsed onto the ground truth, 1 generation
+[INFO] data columns 29, fitted 12, held 17; T = 11000 steps @ 0.002 s
+CMA-ES (lite) initialized: 49 search dims, population 4095, probe=True
+<span class="hl">[it 0] min 1.6126e-14  max 2.9871e-13  mean-probe 2.8400e-13</span></pre></div>
+            <div><p class="label">判断标准</p>
+              <ul class="checks">
+                <li><code>max</code> 小于 1e-10 rad²。本机实测为 3e-13，比后面 A 档门槛 1e-8 小 4 个数量级。</li>
+                <li><code>fitted 12, held 17</code>：12 个腿关节参与拟合，17 个腰和手臂关节按录制数据回放。</li>
+              </ul>
+            </div>
+            <p class="note bad"><strong>如果这里的损失明显大于 1e-10</strong>　先不要往下跑。说明采集和拟合对不上，常见原因是两边用了不同的 URDF 或增益，或者手动改过 <code>SIM_DT</code>。</p>
+            <p class="note info">这次一致性检查会在 <code>logs/pace/g1_29dof_legs/</code> 下留一个运行目录。评估脚本默认读最新的目录，下一步正式拟合开始后，它自然成为最新的，不影响评估。</p>
+          </div>
+        </article>
+
+        <article class="step" id="s8" data-step="8">
+          <div class="step-head"><span class="step-no">步骤 8</span><h3>正式拟合</h3><span class="chip">约 90 分钟</span><label class="done-toggle"><input type="checkbox" id="done-8" data-step="8"> 已完成</label></div>
+          <div class="step-body">
+            <p>开一个专门跑拟合的终端。日志同时写到文件，方便在另一个终端里看进度。<code>--max_iterations 100</code> 是上限；参考运行在第 60 代就达到 A 档，到时可以提前停。</p>
+            <div class="cmd"><pre><code>mkdir -p logs/pace
+python -u scripts/pace/fit_g1.py --task Isaac-Pace-G1-Legs-v0 --headless --num_envs 4096 \
+    --data g1_29dof/g1_sim_legs_seed0.pt --max_iterations 100 --save_interval 10 \
+    2>&amp;1 | tee logs/pace/fit_legs_seed0.log</code></pre><button class="copy" type="button">复制</button></div>
+            <p>在第二个终端里看进度。第一条命令看最近几代，第二条打开 TensorBoard，重点看 <code>0_Episode/mean_probe_score</code> 和直方图 <code>0_Delay/distribution</code>。直方图是样本延迟的分布，中心就是均值；<code>0_Delay/best</code> 只是最好样本的延迟，波动很大。</p>
+            <div class="cmd"><pre><code>grep -E "^\[it " logs/pace/fit_legs_seed0.log | tail -5
+tensorboard --logdir logs/pace/g1_29dof_legs</code></pre><button class="copy" type="button">复制</button></div>
+            <div><p class="label">每一代打印的格式</p>
+<pre class="out"><span class="hl">[it 10] min 3.8485e-04  max 2.9793e-03  mean-probe 1.2817e-04</span>
+  Armature: [...]    ← 这 5 行都是本代最好的那个样本
+  Viscous: [...]
+  Coulomb: [...]
+  Bias: [...]
+  Delay: 2.3896...   ← 最好样本的延迟，不是均值，前 15 代会跳动
+  elapsed 91.2 s</pre></div>
+            <p><code>min</code> 和 <code>max</code> 是 4095 个样本中最好和最差的分数。<code>mean-probe</code> 是本代开始时分布均值的分数，也就是上一代更新后的均值；<code>mean_XXX.pt</code> 存的是本代更新后的均值，两者只差一步更新，收敛后差别可以忽略。判定用的就是这个分数。</p>
+            <figure>
+              <div class="scroll">
+<svg class="chart" viewBox="0 0 680 320" role="img" aria-label="均值探针损失随代数变化：对数 armature 在第 50 代低于 1e-7、第 60 代低于 1e-8；线性 armature 在 15 代时停在 8e-5 并掉进延迟陷阱">
+<line x1="64" y1="276.0" x2="656" y2="276.0" class="grid"/>
+<text x="56" y="280.0" text-anchor="end" class="tick">1e-9</text>
+<line x1="64" y1="244.0" x2="656" y2="244.0" class="grid"/>
+<text x="56" y="248.0" text-anchor="end" class="tick">1e-8</text>
+<line x1="64" y1="212.0" x2="656" y2="212.0" class="grid"/>
+<text x="56" y="216.0" text-anchor="end" class="tick">1e-7</text>
+<line x1="64" y1="180.0" x2="656" y2="180.0" class="grid"/>
+<text x="56" y="184.0" text-anchor="end" class="tick">1e-6</text>
+<line x1="64" y1="148.0" x2="656" y2="148.0" class="grid"/>
+<text x="56" y="152.0" text-anchor="end" class="tick">1e-5</text>
+<line x1="64" y1="116.0" x2="656" y2="116.0" class="grid"/>
+<text x="56" y="120.0" text-anchor="end" class="tick">1e-4</text>
+<line x1="64" y1="84.0" x2="656" y2="84.0" class="grid"/>
+<text x="56" y="88.0" text-anchor="end" class="tick">1e-3</text>
+<line x1="64" y1="52.0" x2="656" y2="52.0" class="grid"/>
+<text x="56" y="56.0" text-anchor="end" class="tick">1e-2</text>
+<line x1="64" y1="20.0" x2="656" y2="20.0" class="grid"/>
+<text x="56" y="24.0" text-anchor="end" class="tick">1e-1</text>
+<line x1="64.0" y1="276" x2="64.0" y2="281" class="axis"/>
+<text x="64.0" y="295" text-anchor="middle" class="tick">0</text>
+<line x1="159.5" y1="276" x2="159.5" y2="281" class="axis"/>
+<text x="159.5" y="295" text-anchor="middle" class="tick">10</text>
+<line x1="255.0" y1="276" x2="255.0" y2="281" class="axis"/>
+<text x="255.0" y="295" text-anchor="middle" class="tick">20</text>
+<line x1="350.5" y1="276" x2="350.5" y2="281" class="axis"/>
+<text x="350.5" y="295" text-anchor="middle" class="tick">30</text>
+<line x1="445.9" y1="276" x2="445.9" y2="281" class="axis"/>
+<text x="445.9" y="295" text-anchor="middle" class="tick">40</text>
+<line x1="541.4" y1="276" x2="541.4" y2="281" class="axis"/>
+<text x="541.4" y="295" text-anchor="middle" class="tick">50</text>
+<line x1="636.9" y1="276" x2="636.9" y2="281" class="axis"/>
+<text x="636.9" y="295" text-anchor="middle" class="tick">60</text>
+<line x1="64" y1="276" x2="656" y2="276" class="axis"/>
+<line x1="64" y1="20" x2="64" y2="276" class="axis"/>
+<text x="360.0" y="314" text-anchor="middle" class="tick">代数（generation）</text>
+<text x="14" y="148.0" text-anchor="middle" class="tick" transform="rotate(-90 14 148.0)">损失 rad²（对数）</text>
+<line x1="64" y1="212.0" x2="656" y2="212.0" class="gate"/>
+<text x="70" y="207.0" text-anchor="start" class="gatelab">B 档门槛 1e-7</text>
+<line x1="64" y1="244.0" x2="656" y2="244.0" class="gate"/>
+<text x="70" y="239.0" text-anchor="start" class="gatelab">A 档门槛 1e-8</text>
+<polyline points="64.0,46.7 73.5,54.6 83.1,67.4 92.6,82.4 102.2,90.8 111.7,94.2 121.3,97.5 130.8,99.5 140.4,100.1 149.9,102.0 159.5,103.8 169.0,105.9 178.6,109.0 188.1,111.7 197.7,115.6 207.2,118.3" class="line-lin"/>
+<polyline points="64.0,67.9 73.5,78.3 83.1,91.7 92.6,98.7 102.2,101.9 111.7,104.8 121.3,106.2 130.8,108.8 140.4,109.6 149.9,111.0 159.5,112.6 169.0,115.7 178.6,119.3 188.1,121.6 197.7,124.8 207.2,128.4 216.8,131.2 226.3,134.0 235.9,137.5 245.4,140.7 255.0,143.2 264.5,144.7 274.1,147.2 283.6,149.5 293.2,150.8 302.7,152.0 312.3,153.2 321.8,153.9 331.4,155.8 340.9,157.7 350.5,159.6 360.0,162.4 369.5,164.0 379.1,166.1 388.6,168.6 398.2,170.4 407.7,173.0 417.3,175.3 426.8,177.6 436.4,180.7 445.9,182.7 455.5,185.5 465.0,187.8 474.6,190.7 484.1,194.2 493.7,197.2 503.2,200.3 512.8,203.9 522.3,206.2 531.9,210.2 541.4,212.7 551.0,215.9 560.5,219.2 570.1,224.7 579.6,227.8 589.2,232.1 598.7,234.9 608.3,238.3 617.8,241.2 627.4,245.5 636.9,249.1 646.5,254.9" class="line-log"/>
+<circle cx="207.2" cy="118.3" r="3.5" class="dot-lin"/>
+<text x="215.2" y="112.3" class="lab-lin">线性 armature：15 代 8.5e-5，延迟卡在 1 步</text>
+<circle cx="636.9" cy="249.1" r="3.5" class="dot-log"/>
+<text x="628.9" y="267.1" text-anchor="end" class="lab-log">对数 armature：60 代 6.9e-9，A 档通过</text>
+</svg>
+              </div>
+              <figcaption>图 2　两次真实运行的均值探针损失。青色是当前默认设置，在第 50 代越过 B 档门槛、第 60 代越过 A 档门槛。橙色是最初的线性 armature 设置，损失降得慢，而且延迟卡在 1 步，已被停止。</figcaption>
+            </figure>
+            <div class="table-wrap"><table>
+              <thead><tr><th class="num">代数</th><th class="num">均值探针损失 rad²</th><th class="num">延迟均值（步）</th><th>这时应该看到什么</th></tr></thead>
+              <tbody>
+                <tr><td class="num">0</td><td class="num">3.2e-3</td><td class="num">4.14</td><td>起点：armature 1.22 倍先验，延迟 5 步</td></tr>
+                <tr><td class="num">10</td><td class="num">1.3e-4</td><td class="num">3.01</td><td>延迟取整已等于真值 3</td></tr>
+                <tr><td class="num">20</td><td class="num">1.4e-5</td><td class="num">3.43</td><td>阻尼、摩擦误差的中位数降到几个百分点，个别关节仍有 15–50%</td></tr>
+                <tr><td class="num">30</td><td class="num">4.4e-6</td><td class="num">3.50</td><td>阻尼、摩擦都在 10% 以内；armature 最慢，仍在收敛</td></tr>
+                <tr><td class="num">40</td><td class="num">8.2e-7</td><td class="num">3.49</td><td>低于 2e-6，说明不在错误延迟的谷里</td></tr>
+                <tr><td class="num">50</td><td class="num">9.5e-8</td><td class="num">3.47</td><td class="pass">B 档通过</td></tr>
+                <tr><td class="num">60</td><td class="num">6.9e-9</td><td class="num">3.47</td><td class="pass">A 档通过，可以停止</td></tr>
+              </tbody>
+            </table></div>
+            <div><p class="label">判断标准</p>
+              <ul class="checks">
+                <li>每代约 90 秒，<code>mean-probe</code> 大体单调下降，可以有小幅回弹。</li>
+                <li>判断延迟要看<b>均值</b>：用步骤 9 的评估脚本看 <code>fitted mean</code> 这一行（每 10 代一个检查点）。参考运行在第 10 代已是 3.01，之后一直在 3.x。每代打印的 <code>Delay</code> 是最好样本的值，第 9–14 代曾打出 1.55、2.39、4.59、2.68，不能单独拿来判断。</li>
+                <li>若延迟均值长期停在 1.x 或 2.x、同时损失停在 1e-5 附近，就是掉进了延迟陷阱，见<a href="#faq">常见问题</a>。</li>
+                <li>达到 A 档后按 <kbd>Ctrl</kbd>+<kbd>C</kbd> 停止即可。检查点每 10 代写一次，最近的 <code>mean_060.pt</code> 已经在磁盘上。</li>
+              </ul>
+            </div>
+          </div>
+        </article>
+
+        <article class="step" id="s9" data-step="9">
+          <div class="step-head"><span class="step-no">步骤 9</span><h3>评估与判定</h3><span class="chip">1 分钟</span><label class="done-toggle"><input type="checkbox" id="done-9" data-step="9"> 已完成</label></div>
+          <div class="step-body">
+            <p>评估脚本只需要 torch，不启动仿真器，拟合还在跑时也可以随时用它看中间结果。默认读 <code>logs/pace/g1_29dof_legs/</code> 下修改时间最新的运行目录和其中编号最大的 <code>mean_XXX.pt</code>。拟合刚启动、第 0 代还没结束时会报 <code>no mean_XXX.pt in …</code>，等两三分钟即可。</p>
+            <div class="cmd"><pre><code>python scripts/pace/eval_g1_sim2sim.py --truth data/g1_29dof/g1_sim_legs_seed0_truth.pt</code></pre><button class="copy" type="button">复制</button></div>
+            <p>要看某一代，或者评估指定的运行目录：</p>
+            <div class="cmd"><pre><code>ls -t logs/pace/g1_29dof_legs/                      # 最新的在最上面
+python scripts/pace/eval_g1_sim2sim.py --truth data/g1_29dof/g1_sim_legs_seed0_truth.pt \
+    --run logs/pace/g1_29dof_legs/&lt;时间戳&gt; --mean mean_050.pt</code></pre><button class="copy" type="button">复制</button></div>
+            <div><p class="label">参考运行在第 60 代的输出（节选）</p>
+<pre class="out">joint                      |  Ia truth       fit   err% | d truth     fit   err% | tf truth     fit   err% |  b truth      fit err mrad
+left_hip_pitch_joint       |   0.01772   0.01762   -0.5 |   2.287   2.287   -0.0 |  0.6074  0.6072   -0.0 |  -0.0221  -0.0220     0.05
+left_ankle_roll_joint      |   0.01591   0.01556   -2.2 |   1.997   1.995   -0.1 |  0.7889  0.7883   -0.1 |   0.0000  -0.0000    -0.00  (pinned)
+right_knee_joint           |   0.02561   0.02529   -1.3 |   5.952   5.955    0.1 |   2.282   2.278   -0.2 |   0.0145   0.0143    -0.24
+...
+delay: truth 3 steps, fitted mean 3.467 -> floor 3 steps (OK)
+|Ia err|  median    0.5 %   max    2.2 %
+|d err|  median    0.0 %   max    0.2 %
+|tau_f err|  median    0.0 %   max    0.2 %
+|bias err| median   0.04 mrad max   0.26 mrad  (over 6 free biases; pinned excluded)
+b_hip_pitch + b_knee error: left -0.21 mrad, right -0.20 mrad
+
+<span class="hl">VERDICT: PASS (tier A, loss 6.94e-09)</span></pre></div>
+            <h4>判定规则</h4>
+            <div class="table-wrap"><table>
+              <thead><tr><th>检查项</th><th>A 档（损失 ≤ 1e-8）</th><th>B 档（损失 ≤ 1e-7）</th></tr></thead>
+              <tbody>
+                <tr><td>损失门槛</td><td colspan="2">均值探针损失必须小于 1e-7，否则直接 <span class="fail">FAIL</span>，不评参数</td></tr>
+                <tr><td>延迟</td><td colspan="2">拟合均值取整必须等于真值</td></tr>
+                <tr><td>armature</td><td>≤ 10%，踝 roll ≤ 15%</td><td>≤ 20%，髋 roll、膝 ≤ 25%，踝 roll ≤ 35%</td></tr>
+                <tr><td>阻尼、摩擦</td><td>≤ 5%</td><td>≤ 10%</td></tr>
+                <tr><td>自由零偏</td><td>≤ 1.5 mrad，髋 roll ≤ 1.0，膝 ≤ 3.0</td><td>≤ 2.0 mrad，膝 ≤ 8.0</td></tr>
+                <tr><td>髋 pitch + 膝零偏之和</td><td>≤ 1.0 mrad</td><td>≤ 2.0 mrad</td></tr>
+              </tbody>
+            </table></div>
+            <ul class="plain">
+              <li><b>标 <code>(pinned)</code> 的零偏</b>是被固定为 0 的关节：髋 yaw、踝、腰 yaw、腕。骨盆固定时重力几乎不加载它们，损失对零偏不敏感，所以不参与统计。</li>
+              <li><b>髋 pitch 和膝的零偏</b>单独看可以互相补偿，二者之和才确定小腿的绝对角度，所以另外检查它们的和。</li>
+              <li><b>出现 <code>TRAP SIGNATURE</code></b>表示所有 armature 误差都为正、延迟取整又小于真值，就是掉进了延迟陷阱。</li>
+            </ul>
+            <div><p class="label">判断标准</p>
+              <ul class="checks">
+                <li>最后一行是 <code>VERDICT: PASS (tier A, ...)</code>，G1 腿部的 sim-to-sim 验证即告完成。</li>
+              </ul>
+            </div>
+          </div>
+        </article>
+      </section>
+
+      <!-- EXTEND -->
+      <section class="chapter" id="extend">
+        <h2><span class="kicker">可选</span>扩展验证</h2>
+        <p>腿部通过后，下面几项能让结论更可靠。每项都会在 <code>logs/pace/</code> 下新建运行目录，评估时最好用 <code>--run</code> 明确指定。</p>
+        <details>
+          <summary>上身：腰 + 双臂 17 个关节</summary>
+          <div class="prose">
+            <p>步骤和腿部一样，只是换 <code>--group upper</code> 和 <code>Isaac-Pace-G1-Upper-v0</code>，评估时加 <code>--robot_name g1_29dof_upper</code>。本机一致性检查的损失约 1.6e-12，完整拟合尚未运行。</p>
+            <div class="cmd"><pre><code>python -u scripts/pace/data_collection_g1.py --headless --group upper --truth_seed 1
+python -u scripts/pace/fit_g1.py --task Isaac-Pace-G1-Upper-v0 --headless --num_envs 4096 \
+    --data g1_29dof/g1_sim_upper_seed1.pt --floor_test
+python -u scripts/pace/fit_g1.py --task Isaac-Pace-G1-Upper-v0 --headless --num_envs 4096 \
+    --data g1_29dof/g1_sim_upper_seed1.pt --max_iterations 100 --save_interval 10 2>&amp;1 | tee logs/pace/fit_upper_seed1.log
+python scripts/pace/eval_g1_sim2sim.py --robot_name g1_29dof_upper --truth data/g1_29dof/g1_sim_upper_seed1_truth.pt</code></pre><button class="copy" type="button">复制</button></div>
+          </div>
+        </details>
+        <details>
+          <summary>换真值种子和优化器种子</summary>
+          <div class="prose">
+            <p>只测一组真值可能恰好碰上好辨识的点。换 <code>--truth_seed</code> 生成新数据，再用不同的 <code>--seed</code> 拟合，看每次是否都能通过。</p>
+            <div class="cmd"><pre><code>python -u scripts/pace/data_collection_g1.py --headless --group legs --truth_seed 2
+python -u scripts/pace/fit_g1.py --task Isaac-Pace-G1-Legs-v0 --headless --num_envs 4096 \
+    --data g1_29dof/g1_sim_legs_seed2.pt --seed 1 --max_iterations 100 --save_interval 10
+python scripts/pace/eval_g1_sim2sim.py --truth data/g1_29dof/g1_sim_legs_seed2_truth.pt</code></pre><button class="copy" type="button">复制</button></div>
+          </div>
+        </details>
+        <details>
+          <summary>延迟扫描：固定延迟为 2、3、4 步</summary>
+          <div class="prose">
+            <p>延迟是整数，损失对它是阶梯状的。把延迟分别钉在 2、3、4 步各拟合一次，比较最终损失：真值 3 步那次应当明显最低。这个方法在真机上也能用来确认延迟。</p>
+            <div class="cmd"><pre><code>for K in 2 3 4; do
+  python -u scripts/pace/fit_g1.py --task Isaac-Pace-G1-Legs-v0 --headless --num_envs 4096 \
+      --data g1_29dof/g1_sim_legs_seed0.pt --fix_delay $K --max_iterations 60 --save_interval 10 \
+      2>&amp;1 | tee logs/pace/fit_legs_delay$K.log
+done</code></pre><button class="copy" type="button">复制</button></div>
+          </div>
+        </details>
+        <details>
+          <summary>结构对照：用原来的力矩延迟去拟合</summary>
+          <div class="prose">
+            <p>数据是用指令延迟执行器生成的。改用原仓库的力矩延迟执行器拟合，损失应该停在明显高于本底的平台上。这说明两种结构在数据上可以区分，也说明为什么选择执行器结构要看留出数据上的损失。力矩延迟在 G1 上超过 2 步会失稳，所以这时延迟范围被限制为 0–2 步，真值 3 步本身就不在范围内。</p>
+            <div class="cmd"><pre><code>python -u scripts/pace/fit_g1.py --task Isaac-Pace-G1-Legs-v0 --headless --num_envs 4096 \
+    --data g1_29dof/g1_sim_legs_seed0.pt --torque_delay --max_iterations 60 --save_interval 10</code></pre><button class="copy" type="button">复制</button></div>
+          </div>
+        </details>
+        <details>
+          <summary>回放你自己规划的轨迹</summary>
+          <div class="prose">
+            <p><code>--plan</code> 读入任意 <code>des_dof_pos</code> 形状为 <code>[T, 29]</code> 的文件，按其中的 <code>joint_names</code> 重排后回放，代替内置 chirp。上真机前，用它在仿真里把真机要跑的那条轨迹先测一遍。文件的行间隔必须是 2 ms，脚本不会重采样。</p>
+            <div class="cmd"><pre><code>python -u scripts/pace/data_collection_g1.py --headless --plan /path/to/plan.pt --truth_seed 0</code></pre><button class="copy" type="button">复制</button></div>
+          </div>
+        </details>
+      </section>
+
+      <!-- FAQ -->
+      <section class="chapter" id="faq">
+        <h2><span class="kicker">排查</span>常见问题</h2>
+        <div class="table-wrap"><table>
+          <thead><tr><th>现象</th><th>原因</th><th>处理</th></tr></thead>
+          <tbody>
+            <tr><td>日志里一行 <code>[INFO]</code> 都没有，但文件已经生成</td><td>Isaac Sim 退出时不刷新 stdout 缓冲</td><td>加 <code>python -u</code> 或 <code>export PYTHONUNBUFFERED=1</code></td></tr>
+            <tr><td>明明报错了，<code>echo $?</code> 却是 0</td><td>Isaac Sim 启动后的异常不会改变退出码</td><td>看输出里有没有 <code>Traceback</code>，或检查输出文件是否存在</td></tr>
+            <tr><td><code>No module named 'cmaes'</code></td><td>sonic 里没装 cmaes</td><td>按步骤 2 的方案 A 或 B 安装</td></tr>
+            <tr><td><code>No module named 'pace_sim2real'</code></td><td>没装本仓库，也没设 PYTHONPATH</td><td>步骤 2 的 <code>pip install -e</code> 或方案 B 的 <code>export</code></td></tr>
+            <tr><td><code>No module named 'torch'</code> 或 <code>'isaaclab'</code></td><td>用了 base 环境的 python</td><td><code>conda activate sonic</code></td></tr>
+            <tr><td><code>No module named 'omni'</code></td><td>在脚本外直接 <code>import pace_sim2real</code></td><td>正常现象，这个包只能在脚本启动 Isaac Sim 后导入</td></tr>
+            <tr><td><code>data dt 0.00500 s != sim dt 0.00200 s</code></td><td>数据每行间隔不是 2 ms</td><td>把数据重采样到 2 ms，或把 <code>SIM_DT</code> 改成与数据一致</td></tr>
+            <tr><td><code>sim gains != recorded gains</code></td><td>采集和拟合用了不同的增益预设</td><td>把 <code>g1_pace_env_cfg.py</code> 里的 <code>GAIN_PRESET</code> 改回采集时的值</td></tr>
+            <tr><td><code>fitted joints were not excited in this recording</code></td><td>任务和数据不匹配，例如腿部数据配了默认的全身任务</td><td>腿部数据用 <code>Isaac-Pace-G1-Legs-v0</code>，上身数据用 <code>Isaac-Pace-G1-Upper-v0</code>，始终显式写 <code>--task</code></td></tr>
+            <tr><td><code>--floor_test needs a sim-to-sim recording with data['truth']</code></td><td>对真机数据做一致性检查</td><td>这个选项只用于 sim-to-sim 数据</td></tr>
+            <tr><td><code>--fix_delay 12 outside the delay box [0.0, 10.0]</code></td><td>延迟超出搜索范围</td><td>指令延迟用 0–10；加了 <code>--torque_delay</code> 时只能 0–2</td></tr>
+            <tr><td><code>need at least 2 CMA samples</code></td><td><code>--num_envs</code> 太小，env 0 被均值探针占用</td><td>至少 3，正式拟合用 4096</td></tr>
+            <tr><td><code>Environment `Isaac-Pace-G1-Leg` doesn't exist</code></td><td>任务名拼错</td><td>可用的是 <code>Isaac-Pace-G1-v0</code>、<code>-Legs-v0</code>、<code>-Upper-v0</code></td></tr>
+            <tr><td><code>The asset path does not exist</code></td><td><code>G1_URDF_PATH</code> 指向的文件不存在</td><td>取消该变量使用默认路径，或指向有效的 29 自由度 URDF</td></tr>
+            <tr><td><code>ground truth outside the fit bounds at indices [116]</code></td><td><code>--truth_delay</code> 超过 10</td><td>用 0–10 之间的整数</td></tr>
+            <tr><td><code>no runs under logs/pace/g1_29dof_upper</code></td><td>评估时 <code>--robot_name</code> 和拟合任务不对应</td><td>腿部 <code>g1_29dof_legs</code>，上身 <code>g1_29dof_upper</code>，全身 <code>g1_29dof</code></td></tr>
+            <tr><td>评估报告里每个关节误差都很大，但损失很小</td><td>用错了真值文件，脚本不会检查二者是否对应</td><td>用拟合所用数据的同名 <code>_truth.pt</code>；运行目录的 <code>config.pt</code> 里 <code>data_file</code> 记着是哪一个</td></tr>
+            <tr><td>延迟均值（评估脚本的 <code>fitted mean</code>）长期停在 1.x 或 2.x，所有 armature 都偏大，损失停在 1e-5 左右</td><td>延迟陷阱：armature 起点偏重，拟合用更短的延迟来补偿相位</td><td>确认没有加 <code>--linear_armature</code>；仍然出现就用延迟扫描逐个比较</td></tr>
+            <tr><td>跑到 200 代都不停</td><td>无噪声数据上相对极差停止条件永远不满足</td><td>用 <code>--max_iterations</code> 控制，或到 A 档后手动停止</td></tr>
+          </tbody>
+        </table></div>
+      </section>
+
+      <!-- CHANGES -->
+      <section class="chapter" id="changes">
+        <h2><span class="kicker">改动</span>相对原代码改了什么</h2>
+        <p>G1 用到的每个功能都放在新文件里，原来 ANYmal 用的文件一行没改。4 个被修改的已有文件只多了导出、注册和导航各几行，唯一被改写的一行是 <code>optim/__init__.py</code> 的 <code>__all__</code>，原有名字全部保留。下表先给出全貌，后面逐项对照原逻辑和新逻辑。</p>
+        <div class="table-wrap"><table>
+          <thead><tr><th>文件</th><th>状态</th><th>对应的原文件</th><th>作用</th></tr></thead>
+          <tbody>
+            <tr><td><code>utils/pace_actuator_cmd_delay.py</code><br><code>utils/pace_actuator_cmd_delay_cfg.py</code></td><td><span class="tag new">新增</span></td><td><code>utils/pace_actuator.py</code><br><code>utils/pace_actuator_cfg.py</code></td><td>把延迟从输出力矩挪到指令上的执行器</td></tr>
+            <tr><td><code>optim/cma_es_lite.py</code></td><td><span class="tag new">新增</span></td><td><code>optim/cma_es.py</code></td><td>均值探针、省显存、对数 armature、子集安全的参数写入</td></tr>
+            <tr><td><code>tasks/manager_based/pace/g1_pace_env_cfg.py</code></td><td><span class="tag new">新增</span></td><td><code>anymal_pace_env_cfg.py</code></td><td>G1 资产、5 个电机组、增益、逐关节搜索范围</td></tr>
+            <tr><td><code>scripts/pace/data_collection_g1.py</code></td><td><span class="tag new">新增</span></td><td><code>scripts/pace/data_collection.py</code></td><td>逐关节随机真值、分关节 chirp、29 列数据</td></tr>
+            <tr><td><code>scripts/pace/fit_g1.py</code></td><td><span class="tag new">新增</span></td><td><code>scripts/pace/fit.py</code></td><td>支持只拟合部分关节、各项检查、诊断选项</td></tr>
+            <tr><td><code>scripts/pace/eval_g1_sim2sim.py</code></td><td><span class="tag new">新增</span></td><td>无，最接近 <code>plot_trajectory.py</code></td><td>和真值对比并给出 PASS / FAIL</td></tr>
+            <tr><td><code>docs/examples/g1.md</code>、本手册</td><td><span class="tag new">新增</span></td><td><code>docs/examples/anymal.md</code></td><td>说明文档</td></tr>
+            <tr><td><code>tasks/manager_based/__init__.py</code></td><td><span class="tag mod">修改</span></td><td>同一文件</td><td>末尾追加 3 个 G1 任务注册，ANYmal 注册未动</td></tr>
+            <tr><td><code>optim/__init__.py</code>、<code>utils/__init__.py</code></td><td><span class="tag mod">修改</span></td><td>同一文件</td><td>追加新类的导出</td></tr>
+            <tr><td><code>mkdocs.yml</code></td><td><span class="tag mod">修改</span></td><td>同一文件</td><td>文档导航加一行</td></tr>
+            <tr><td><code>fit.py</code>、<code>data_collection.py</code>、<code>plot_trajectory.py</code>、<code>cma_es.py</code>、<code>pace_actuator.py</code>、<code>pace_actuator_cfg.py</code>、<code>anymal_pace_env_cfg.py</code>、<code>pace_sim2real_env_cfg.py</code></td><td><span class="tag same">未改</span></td><td>—</td><td>ANYmal 流程完整保留</td></tr>
+          </tbody>
+        </table></div>
+        <p class="note info">几样东西刻意保持不变：损失函数（关节位置误差平方和的时间平均，扣除零偏），参数排列 <code>[armature | 阻尼 | 摩擦 | 零偏 | 延迟]</code>，摩擦的写入顺序，延迟向下取整，“先打分、再执行第 k 行指令”的回放时序，以及 <code>mean_XXX.pt</code> 的含义。第 7 步的本底测试能到 1e-13，靠的正是这些约定两边一致。</p>
+
+        <h3>执行器</h3>
+        <figure>
+          <div class="scroll">
+            <svg viewBox="0 0 760 270" role="img" aria-label="原 PaceDCMotor 把延迟放在 PD 输出力矩上，位于反馈回路之内；新 PaceDCMotorCmdDelay 把延迟放在指令 q hat 上，位于回路之外，PD 使用当前的 q 和 q dot。">
+              <defs>
+                <marker id="bh" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="head"/></marker>
+              </defs>
+              <!-- row A -->
+              <text x="12" y="26" class="row-title">原 PaceDCMotor：延迟在输出力矩上（回路内）</text>
+              <text x="40" y="76" text-anchor="middle" class="mono">q̂(t)</text>
+              <line x1="62" y1="72" x2="128" y2="72" class="edge" marker-end="url(#bh)"/>
+              <rect x="130" y="48" width="170" height="48" rx="8" class="box"/>
+              <text x="215" y="70" text-anchor="middle">PD + 力矩-速度裁剪</text>
+              <text x="215" y="87" text-anchor="middle" class="small">用当前 q、q̇</text>
+              <line x1="300" y1="72" x2="348" y2="72" class="edge" marker-end="url(#bh)"/>
+              <rect x="350" y="48" width="110" height="48" rx="8" class="box-accent"/>
+              <text x="405" y="77" text-anchor="middle" class="accent-text">延迟 Td</text>
+              <line x1="460" y1="72" x2="528" y2="72" class="edge" marker-end="url(#bh)"/>
+              <text x="494" y="64" text-anchor="middle" class="small">τ</text>
+              <rect x="530" y="48" width="130" height="48" rx="8" class="box"/>
+              <text x="595" y="77" text-anchor="middle">关节动力学</text>
+              <line x1="660" y1="72" x2="728" y2="72" class="edge" marker-end="url(#bh)"/>
+              <text x="744" y="76" text-anchor="middle" class="mono">q</text>
+              <path d="M700,72 L700,118 L215,118 L215,100" class="edge" marker-end="url(#bh)"/>
+              <text x="458" y="112" text-anchor="middle" class="small">反馈 q、q̇：经过延迟块才起作用</text>
+              <!-- row B -->
+              <text x="12" y="160" class="row-title">新 PaceDCMotorCmdDelay：延迟在指令上（回路外）</text>
+              <text x="40" y="210" text-anchor="middle" class="mono">q̂(t)</text>
+              <line x1="62" y1="206" x2="128" y2="206" class="edge" marker-end="url(#bh)"/>
+              <rect x="130" y="182" width="110" height="48" rx="8" class="box-accent"/>
+              <text x="185" y="211" text-anchor="middle" class="accent-text">延迟 Td</text>
+              <line x1="240" y1="206" x2="288" y2="206" class="edge" marker-end="url(#bh)"/>
+              <text x="264" y="198" text-anchor="middle" class="small mono">q̂(t−Td)</text>
+              <rect x="290" y="182" width="170" height="48" rx="8" class="box"/>
+              <text x="375" y="204" text-anchor="middle">PD + 力矩-速度裁剪</text>
+              <text x="375" y="221" text-anchor="middle" class="small">用当前 q、q̇</text>
+              <line x1="460" y1="206" x2="528" y2="206" class="edge" marker-end="url(#bh)"/>
+              <text x="494" y="198" text-anchor="middle" class="small">τ</text>
+              <rect x="530" y="182" width="130" height="48" rx="8" class="box"/>
+              <text x="595" y="211" text-anchor="middle">关节动力学</text>
+              <line x1="660" y1="206" x2="728" y2="206" class="edge" marker-end="url(#bh)"/>
+              <text x="744" y="210" text-anchor="middle" class="mono">q</text>
+              <path d="M700,206 L700,252 L375,252 L375,234" class="edge" marker-end="url(#bh)"/>
+              <text x="538" y="266" text-anchor="middle" class="small">反馈 q、q̇：不经过延迟，直接回到 PD</text>
+            </svg>
+          </div>
+          <figcaption>图 3　同一个延迟块，放的位置不同。原实现里它在反馈回路内，会改变闭环幅值和稳定裕度；新实现把它放在回路外的指令上，和论文 Eq. 1、Isaac Lab 的 DelayedPDActuator 以及 Unitree 官方仿真执行器的结构一致。</figcaption>
+        </figure>
+        <div class="change">
+          <h3>延迟作用在哪里</h3>
+          <div class="where">utils/pace_actuator.py:60-66 → utils/pace_actuator_cmd_delay.py:70-78</div>
+          <div class="compare">
+            <div class="before"><span class="tagline">原逻辑</span>先算 PD 和裁剪，再把得到的力矩送进延迟缓冲：
+<pre>tau = super().compute(cmd, q - b, qd)
+tau.joint_efforts = torques_delay_buffer.compute(...)</pre></div>
+            <div class="after"><span class="tagline">新逻辑</span>先把指令 q̂、q̂̇ 和前馈力矩各自延迟，再用当前状态算 PD 和裁剪：
+<pre>cmd.joint_positions  = pos_buf.compute(...)
+cmd.joint_velocities = vel_buf.compute(...)
+cmd.joint_efforts    = eff_buf.compute(...)
+return super().compute(cmd, q - b, qd)</pre></div>
+          </div>
+          <p class="why"><b>为什么</b>　Unitree 的电机 SDK 文档说明 PD 在电机端用最新的编码器读数计算，上位机只下发目标和增益，延迟主要在指令链路上，所以指令延迟更贴近硬件。这一点在 G1 上还没有实测，上真机前应先用阶跃响应确认。另一个原因是稳定性：用 G1 的低增益时，回路内的力矩延迟在 2 ms 步长下超过 2–3 步，踝和腕就会发散，CMA-ES 的大部分样本会变成 NaN。原类完全没动，ANYmal 仍然用它；G1 想对照时，拟合脚本加 <code>--torque_delay</code> 即可。</p>
+        </div>
+        <div class="change">
+          <h3>缓冲区与接口</h3>
+          <div class="where">pace_actuator.py:44-45 → pace_actuator_cmd_delay.py:48-68</div>
+          <div class="compare">
+            <div class="before"><span class="tagline">原逻辑</span>一个力矩缓冲，长度 <code>max_delay + 1</code>。</div>
+            <div class="after"><span class="tagline">新逻辑</span>位置、速度、前馈力矩三个缓冲，长度都是 <code>max_delay</code>。Isaac Lab 的 DelayBuffer 允许延迟取 0 到长度本身，所以 0–10 步都有效。<code>update_encoder_bias</code>、<code>update_time_lags</code>、<code>reset</code> 的签名和原类相同。</div>
+          </div>
+          <p class="why"><b>为什么</b>　保持同样的接口，优化器和参数写入代码不用区分两种执行器。</p>
+        </div>
+
+        <h3>优化器</h3>
+        <div class="change">
+          <h3>env 0 用来评估当前均值</h3>
+          <div class="where">optim/cma_es.py:44, 106-109 → optim/cma_es_lite.py:169-173, 259-264</div>
+          <div class="compare">
+            <div class="before"><span class="tagline">原逻辑</span>4096 个环境全是 CMA 样本。报告的是更新后的均值，但这组均值本身从未被仿真过。</div>
+            <div class="after"><span class="tagline">新逻辑</span>env 0 每代跑当前的分布均值，其余 4095 个是样本。只有样本的分数交给 CMA-ES，均值的分数单独记为 <code>mean-probe</code>。</div>
+          </div>
+          <p class="why"><b>为什么</b>　最终报告的参数就是均值，每代都能直接看到它的真实损失，评估脚本的损失门槛也基于这个数。严格说探针跑的是本代开始时的均值，<code>mean_XXX.pt</code> 是更新后的均值，二者差一步更新。代价是种群少一个样本。</p>
+        </div>
+        <div class="change">
+          <h3>轨迹缓冲区与显存</h3>
+          <div class="where">cma_es.py:51, 74 → cma_es_lite.py:227-229, 267-271</div>
+          <div class="compare">
+            <div class="before"><span class="tagline">原逻辑</span>每代保存所有样本的完整轨迹，形状为（种群，T，关节数）。</div>
+            <div class="after"><span class="tagline">新逻辑</span>只保存 env 0 的一条轨迹，形状为（T，关节数）。</div>
+          </div>
+          <div class="table-wrap"><table>
+            <thead><tr><th>情形</th><th class="num">原缓冲区</th><th class="num">新缓冲区</th></tr></thead>
+            <tbody>
+              <tr><td>G1 全身 29 关节，4096 个环境，11000 步</td><td class="num">约 4.9 GiB</td><td class="num">约 1.3 MB</td></tr>
+              <tr><td>G1 腿部 12 关节，同上</td><td class="num">约 2.0 GiB</td><td class="num">约 0.5 MB</td></tr>
+            </tbody>
+          </table></div>
+          <p class="why"><b>为什么</b>　16 GB 显存还要装下 4096 个 G1 的 PhysX 数据。附带好处是 <code>best_trajectory.pt</code> 和它对应的参数终于是同一组：原实现把最好样本的轨迹和均值参数存在一起，二者并不对应。</p>
+        </div>
+        <div class="change">
+          <h3>armature 在对数空间搜索</h3>
+          <div class="where">cma_es.py:151-154 → cma_es_lite.py:185-192, 247-254；g1_pace_env_cfg.py 中 log_armature=True</div>
+          <div class="compare">
+            <div class="before"><span class="tagline">原逻辑</span>所有参数线性映射：<code>lo + u·(hi − lo)</code>。G1 的 armature 范围是 0.3–5 倍先验，起点在 2.65 倍。</div>
+            <div class="after"><span class="tagline">新逻辑</span>armature 用 <code>lo·(hi/lo)^u</code>，起点在几何中心 1.22 倍先验，每个数量级的分辨率相同。其余参数仍是线性映射。</div>
+          </div>
+          <p class="why"><b>为什么</b>　这是在 G1 sim-to-sim 中实际踩到的坑：线性映射起点太重，拟合用偏短的延迟去补偿多出来的相位滞后，停在“延迟 1 步、armature 全部偏大 20–320%”的局部最优里（图 2 橙线）。换成对数映射后，第 10 代就找到了正确的延迟。</p>
+        </div>
+        <div class="change">
+          <h3>只拟合部分关节时的参数写入</h3>
+          <div class="where">cma_es.py:111-134 → cma_es_lite.py:86-139（write_pace_params_to_sim）</div>
+          <div class="compare">
+            <div class="before"><span class="tagline">原逻辑</span>用 <code>argmax</code> 把拟合关节对应到各执行器组。有两个问题：不在拟合列表里的关节，argmax 在全零列上返回 0，会被静默赋上第一个拟合关节的零偏；执行器组覆盖全部关节而只拟合子集时，索引会错位。</div>
+            <div class="after"><span class="tagline">新逻辑</span>先建一个覆盖全部关节的零偏张量，只在拟合关节上填值，再按各组的 <code>joint_indices</code> 切出来。未拟合的关节零偏为 0，并支持“按录制数据回放”的保持关节。采集脚本写真值时也用这同一个函数。</div>
+          </div>
+          <p class="why"><b>为什么</b>　G1 有 5 个执行器组，而且按腿部、上身分开拟合，原映射会把错误的零偏写进被保持的关节。ANYmal 只有 1 个组且 12 个关节全部拟合，原代码在那里是对的，也继续在用。</p>
+        </div>
+        <div class="change">
+          <h3>其他小改动</h3>
+          <div class="where">cma_es_lite.py</div>
+          <ul class="plain">
+            <li><b>随机种子</b>：原来写死 <code>seed=0</code>，现在是参数，拟合脚本用 <code>--seed</code> 传入。</li>
+            <li><b>参数共享</b>：可选让左右对称关节或同型号电机共享 armature、阻尼、摩擦，零偏始终逐关节、延迟始终全局。默认不共享，与原布局相同。</li>
+            <li><b>NaN 保护</b>：发散样本的分数被换成一个大的有限值，避免破坏 CMA-ES 的排序。原来没有。</li>
+            <li><b>停止条件</b>：<code>(max − min)/min</code> 加了除零保护，其余不变。</li>
+            <li><b>检查点</b>：新增 <code>probe_XXX.pt</code>（均值探针的参数、损失、轨迹）和 <code>best_trajectory_params.pt</code>；<code>mean_XXX.pt</code> 的含义不变。</li>
+            <li><b>config.pt</b>：在原有字段基础上，额外记录执行器类、延迟范围、种子、是否对数 armature、所用数据文件等。</li>
+          </ul>
+        </div>
+
+        <h3>拟合脚本</h3>
+        <div class="change">
+          <h3>没被拟合的关节怎么处理</h3>
+          <div class="where">scripts/pace/fit.py:95-96 → scripts/pace/fit_g1.py:151-155, 196-198, 248-251</div>
+          <div class="compare">
+            <div class="before"><span class="tagline">原逻辑</span>
+<pre>actions = torch.zeros(action_space)
+actions[:, sim_joint_ids] = target[k]</pre>
+            不在 <code>joint_order</code> 里的关节全程收到绝对 0 rad 的目标。</div>
+            <div class="after"><span class="tagline">新逻辑</span>数据里有、但不参与拟合的关节从录制的初始位置出发，按录制的指令回放；数据里也没有的关节保持默认姿态。</div>
+          </div>
+          <p class="why"><b>为什么</b>　只拟合腿时，不能让腰和手臂被拉到 0 rad，否则仿真和录制时的姿态就不一样了。</p>
+        </div>
+        <div class="change">
+          <h3>数据检查</h3>
+          <div class="where">fit_g1.py:134-168, 76-95</div>
+          <div class="compare">
+            <div class="before"><span class="tagline">原逻辑</span>不做任何检查。默认数据列顺序就是 <code>joint_order</code>，每个物理步读一行，不管数据自己的时间轴。</div>
+            <div class="after"><span class="tagline">新逻辑</span>
+              <ul class="plain">
+                <li>列顺序取自数据里的 <code>joint_names</code>。</li>
+                <li>行间隔和仿真步长相差超过 5% 就报错。</li>
+                <li>被拟合的关节必须在数据的 <code>excited</code> 列表里。</li>
+                <li>数据记录的 kp/kd 必须和仿真执行器的增益一致。</li>
+              </ul>
+            </div>
+          </div>
+          <p class="why"><b>为什么</b>　PACE 是在给定 PD 律和时间基准的前提下辨识参数。增益或步长不对，拟合照样能跑完，只是结果是错的。这几项检查把“静默出错”变成“当场报错”。</p>
+        </div>
+        <div class="change">
+          <h3>新增的命令行选项</h3>
+          <div class="where">fit_g1.py:26-44, 100-113, 172-191</div>
+          <div class="table-wrap"><table>
+            <thead><tr><th>选项</th><th>作用</th></tr></thead>
+            <tbody>
+              <tr><td><code>--data</code></td><td>指定数据文件，路径相对于 <code>data/</code></td></tr>
+              <tr><td><code>--max_iterations</code>、<code>--save_interval</code>、<code>--epsilon</code></td><td>覆盖配置里的迭代上限、检查点间隔、停止阈值</td></tr>
+              <tr><td><code>--floor_test</code></td><td>把搜索范围收窄到真值，只跑一代，测本底损失</td></tr>
+              <tr><td><code>--fix_delay K</code></td><td>把延迟钉在 K 步，用于延迟扫描</td></tr>
+              <tr><td><code>--linear_armature</code></td><td>退回线性 armature 映射，仅供对照</td></tr>
+              <tr><td><code>--torque_delay</code></td><td>改用原仓库的力矩延迟执行器，延迟范围 0–2 步</td></tr>
+              <tr><td><code>--seed</code>、<code>--tie</code>、<code>--no_probe</code></td><td>优化器种子、参数共享方式、关闭均值探针</td></tr>
+              <tr><td><code>--allow_unexcited</code>、<code>--allow_gain_mismatch</code></td><td>跳过对应检查，结果需自行判断</td></tr>
+            </tbody>
+          </table></div>
+          <p class="why"><b>为什么</b>　原脚本只有 <code>--num_envs</code> 和 <code>--task</code>。这些选项用于 sim-to-sim 诊断，也是上真机后排查问题的工具。执行器类名会同时写进 <code>config.pt</code> 和 <code>actuator.json</code>，以后训练时可以据此确认用了同一种结构。</p>
+        </div>
+
+        <h3>数据采集脚本</h3>
+        <div class="change">
+          <h3>真值怎么来</h3>
+          <div class="where">scripts/pace/data_collection.py:60-64 → scripts/pace/data_collection_g1.py:131-167</div>
+          <div class="compare">
+            <div class="before"><span class="tagline">原逻辑</span>所有关节用同一组写死的值：armature 0.1、阻尼 4.5、摩擦 0.05、零偏 0.05、延迟 5 步。其中延迟 5 步正好是搜索范围 0–10 的中心，也就是 CMA-ES 的起点。</div>
+            <div class="after"><span class="tagline">新逻辑</span>按 <code>--truth_seed</code> 为每个关节单独抽取：armature 0.5–3 倍先验、阻尼取范围的 10–90%、摩擦 0.3–1.2 倍先验、零偏 ±0.03 rad，重力看不见的关节零偏为 0，延迟默认 3 步。超出拟合范围会报错。</div>
+          </div>
+          <p class="why"><b>为什么</b>　各关节取值相同，就测不出关节对应错位的问题。真值落在起点上，就测不出搜索能力。真值要分布在起点两侧：第一次跑时真值全在一侧，正是它把拟合推进了延迟陷阱。摩擦不超过 1.2 倍先验，是为了不让关节被静摩擦卡住。</p>
+        </div>
+        <div class="change">
+          <h3>激励轨迹</h3>
+          <div class="where">data_collection.py:92-117 → data_collection_g1.py:76-122</div>
+          <div class="compare">
+            <div class="before"><span class="tagline">原逻辑</span>所有关节共用一条 0.1–10 Hz 的 chirp，用 ANYmal 专用的方向、偏置、幅值三个 12 维向量变换，所有关节同时运动，没有静止段和淡入淡出。</div>
+            <div class="after"><span class="tagline">新逻辑</span>
+              <ul class="plain">
+                <li>以站立中心姿态为基准：静止 1 秒 → chirp 20 秒 → 静止 1 秒，淡入淡出 2 秒。</li>
+                <li>每类关节有自己的幅值和频率上限。</li>
+                <li>只激励 <code>--group</code> 选中的那一组关节。</li>
+                <li>左右不镜像。</li>
+                <li>支持用 <code>--plan</code> 回放外部指令文件。</li>
+              </ul>
+            </div>
+          </div>
+          <p class="why"><b>为什么</b>　G1 的关节多、增益低、共振频率各不相同，统一的大幅值会让一部分关节饱和，另一部分几乎不动。只激励一组关节，才能让分组拟合保持严格正确。髋部左右镜像会让两脚距离缩到 0.12 m，在真机上可能相撞。</p>
+        </div>
+        <div class="change">
+          <h3>记录的内容</h3>
+          <div class="where">data_collection.py:131-154 → data_collection_g1.py:214-252</div>
+          <div class="compare">
+            <div class="before"><span class="tagline">原逻辑</span>只存 <code>time</code>、<code>dof_pos</code>、<code>des_dof_pos</code> 三个键，12 列；<code>des_dof_pos</code> 是执行后从仿真读回的目标；最后弹出 matplotlib 图。</div>
+            <div class="after"><span class="tagline">新逻辑</span>
+              <ul class="plain">
+                <li>按 Unitree SDK 顺序存全部 29 列。<code>dof_pos</code> 仍是执行前读取的编码器读数；<code>des_dof_pos</code> 直接存下发的指令，数值上与原来相同。</li>
+                <li>额外保存 <code>joint_names</code>、<code>excited</code>、<code>kp</code>、<code>kd</code> 和 <code>truth</code>，另写一份 <code>_truth.pt</code>。</li>
+                <li>时间轴改为 <code>k · dt</code>。原来用的 <code>linspace</code> 间隔略大于 dt。</li>
+                <li>不弹图。</li>
+              </ul>
+            </div>
+          </div>
+          <p class="why"><b>为什么</b>　拟合脚本的检查要用到这些字段，而且格式和真机录制的一致，以后换成真机数据时代码不用改。</p>
+        </div>
+
+        <h3>环境配置</h3>
+        <div class="change">
+          <h3>G1 辨识环境</h3>
+          <div class="where">anymal_pace_env_cfg.py → g1_pace_env_cfg.py</div>
+          <div class="table-wrap"><table>
+            <thead><tr><th>项目</th><th>ANYmal（原）</th><th>G1（新）</th></tr></thead>
+            <tbody>
+              <tr><td>资产</td><td><code>ANYMAL_D_CFG</code>（USD），高度 1.0 m</td><td>29 自由度 URDF，<code>G1_URDF_PATH</code> 可改，骨盆固定在 1.2 m，自碰撞关闭</td></tr>
+              <tr><td>步长</td><td>0.0025 s（400 Hz）</td><td>0.002 s（500 Hz，Unitree SDK 的控制周期）</td></tr>
+              <tr><td>执行器组</td><td>1 组，kp 85 / kd 0.6</td><td>5 组：7520-14、7520-22、双 5020 连杆、5020、4010，力矩-速度曲线取自 Unitree 数据</td></tr>
+              <tr><td>增益</td><td>全部关节相同</td><td>BeyondMimic 预设（10 Hz，ζ = 2），腰 roll/pitch 另设 kp 150</td></tr>
+              <tr><td>armature 范围</td><td>所有关节 [1e-5, 1]</td><td>各关节 [0.3, 5] 倍 Unitree 先验，对数搜索</td></tr>
+              <tr><td>阻尼范围</td><td>[0, 7]</td><td>[0, max(20·Fd, 2·√(kp·5·Ia))]</td></tr>
+              <tr><td>摩擦范围</td><td>[0, 0.5]</td><td>[0, 2·Fs]，中心正好是先验</td></tr>
+              <tr><td>零偏范围</td><td>±0.1 rad</td><td>±0.05 rad；髋 yaw、踝、腰 yaw、腕固定为 ±1e-4</td></tr>
+              <tr><td>延迟范围</td><td>0–10 步（25 ms）</td><td>0–10 步（20 ms）；力矩延迟结构下 0–2 步</td></tr>
+              <tr><td>任务</td><td><code>Isaac-Pace-Anymal-D-v0</code></td><td><code>Isaac-Pace-G1-v0</code>、<code>-Legs-v0</code>、<code>-Upper-v0</code></td></tr>
+            </tbody>
+          </table></div>
+          <p class="why"><b>为什么</b>　腰部加大增益，是因为骨盆固定后上身像倒立摆，重力刚度约 −21 N·m/rad（代码取 −20.62），按行走增益会下垂到 ±0.52 rad 的限位上。零偏只能通过重力体现，重力不加载的关节放开零偏，它就会随机游走，最后被当成编码器偏置带进训练。只拟合一组关节，靠的是骨盆固定后两腿和“腰加双臂”是根节点下互不影响的分支。</p>
+        </div>
+
+        <h3>注册、导出与评估</h3>
+        <div class="change">
+          <div class="compare">
+            <div class="before"><span class="tagline">原逻辑</span><code>tasks/manager_based/__init__.py</code> 只注册 ANYmal；<code>optim</code> 只导出 <code>CMAESOptimizer</code>；<code>utils</code> 只导出 <code>PaceDCMotor(Cfg)</code>。没有和真值对比的工具，<code>plot_trajectory.py</code> 只画曲线。</div>
+            <div class="after"><span class="tagline">新逻辑</span>在 <code>tasks/manager_based/__init__.py</code> 末尾追加 3 个 G1 任务注册；新执行器的导入加在 <code>utils/__init__.py</code> 原有导入之后，<code>optim/__init__.py</code> 的 <code>__all__</code> 扩写为包含原名字的列表；顶层 <code>pace_sim2real/__init__.py</code> 未动；新增 <code>eval_g1_sim2sim.py</code>，按损失门槛和分档阈值给出判定。</div>
+          </div>
+          <p class="why"><b>为什么</b>　不删除、不改名任何已有的导出，原有的 import 路径全部有效。</p>
+        </div>
+      </section>
+
+      <!-- FILES -->
+      <section class="chapter" id="files">
+        <h2><span class="kicker">速查</span>输出文件</h2>
+        <div class="table-wrap"><table>
+          <thead><tr><th>文件</th><th>谁写的</th><th>内容</th></tr></thead>
+          <tbody>
+            <tr><td><code>data/g1_29dof/g1_sim_&lt;组&gt;_seed&lt;种子&gt;.pt</code></td><td>采集</td><td><code>time</code> [T]、<code>dof_pos</code> [T, 29]、<code>des_dof_pos</code> [T, 29]、<code>joint_names</code>、<code>excited</code>、<code>kp</code>、<code>kd</code>、<code>truth</code>；T = 11000</td></tr>
+            <tr><td><code>…_truth.pt</code></td><td>采集</td><td><code>params</code> [117] = [armature 29 | 阻尼 29 | 摩擦 29 | 零偏 29 | 延迟]，每段按 SDK 顺序；另有 <code>joint_order</code>、<code>layout</code>、<code>delay_steps</code>、<code>actuator_class</code>、<code>seed</code></td></tr>
+            <tr><td><code>logs/pace/g1_29dof_legs/&lt;时间戳&gt;/config.pt</code></td><td>拟合</td><td>搜索范围、拟合关节、所用数据、执行器类、延迟范围、种子等</td></tr>
+            <tr><td><code>…/mean_XXX.pt</code></td><td>拟合</td><td>第 XXX 代更新后的均值 [49]，布局 [armature 12 | 阻尼 12 | 摩擦 12 | 零偏 12 | 延迟]</td></tr>
+            <tr><td><code>…/probe_XXX.pt</code></td><td>拟合</td><td>均值探针这一代用的参数、它的损失和轨迹 [11000, 12]</td></tr>
+            <tr><td><code>…/best_trajectory.pt</code>、<code>best_trajectory_params.pt</code></td><td>拟合</td><td>最近一次写检查点那一代的均值探针轨迹，以及产生它的那组参数，与同代的 <code>probe_XXX.pt</code> 一致</td></tr>
+            <tr><td><code>…/actuator.json</code></td><td>拟合</td><td>执行器类、延迟结构、延迟范围、步长、拟合关节、任务名</td></tr>
+            <tr><td><code>…/events.out.tfevents.*</code></td><td>拟合</td><td>TensorBoard 日志：每关节参数的分布与最优值、分数、延迟</td></tr>
+          </tbody>
+        </table></div>
+      </section>
+
+      <!-- NEXT -->
+      <section class="chapter" id="next">
+        <h2><span class="kicker">之后</span>上真机前要记住的几点</h2>
+        <ul class="plain">
+          <li><b>同一套约定</b>：真机录制也要是 2 ms 一行、SDK 顺序 29 列、带 <code>joint_names</code>、<code>excited</code>、<code>kp</code>、<code>kd</code>，这样 <code>fit_g1.py</code> 不用改就能吃真机数据。</li>
+          <li><b>第 k 行的读数必须在第 k 行指令生效之前采样</b>，而且录制开始时机器人要静止。错一行就是 2 ms，会被延迟参数吸收掉。</li>
+          <li><b>骨盆必须刚性夹住</b>，不能用绳子吊：吊绳约 0.4–0.7 Hz 的摆动落在扫频范围里。</li>
+          <li><b>armature 在现有增益下辨识得最慢</b>：用 BeyondMimic 增益时，踝关节的阻尼项约为惯量项的 5 倍，可考虑为辨识单独降低 kd。</li>
+          <li><b>训练时的步长和执行器类</b>要和辨识时一致：步长 0.002 s，执行器 <code>PaceDCMotorCmdDelay</code>，<code>max_delay</code> 填辨识出的延迟向下取整。</li>
+        </ul>
+      </section>
+    </main>
+  </div>
+
+  <footer>
+    <div>本手册对应 <code>pace-sim2real</code> 仓库 <code>g1-sim2sim</code> 分支的工作区状态，基于 main 分支 f07259c。参考数值来自本机 2026-09-23 的实际运行。</div>
+    <div>本地文件：<code>docs/examples/g1_sim2sim_guide.html</code>。完成进度只保存在当前浏览器里。</div>
+  </footer>
+</div>
+
+<script>
+(function () {
+  var KEY = "g1-sim2sim-guide.v1";
+  var TOTAL = 9;
+  function load() { try { return JSON.parse(localStorage.getItem(KEY) || "{}"); } catch (e) { return {}; } }
+  function save(s) { try { localStorage.setItem(KEY, JSON.stringify(s)); } catch (e) {} }
+  var state = load();
+  function render() {
+    var done = 0;
+    for (var i = 1; i <= TOTAL; i++) {
+      var on = !!state[i];
+      if (on) done++;
+      var box = document.getElementById("done-" + i);
+      if (box) box.checked = on;
+      var art = document.getElementById("s" + i);
+      if (art) art.classList.toggle("is-done", on);
+      var li = document.querySelector('.toc li[data-step="' + i + '"]');
+      if (li) li.classList.toggle("done", on);
+    }
+    var fill = document.getElementById("progress-fill");
+    if (fill) fill.style.width = (100 * done / TOTAL) + "%";
+    var txt = document.getElementById("progress-text");
+    if (txt) txt.textContent = "已完成 " + done + " / " + TOTAL + " 步";
+  }
+  document.querySelectorAll(".done-toggle input").forEach(function (box) {
+    box.addEventListener("change", function () { state[box.dataset.step] = box.checked; save(state); render(); });
+  });
+  document.querySelectorAll(".cmd").forEach(function (wrap) {
+    var btn = wrap.querySelector(".copy");
+    var code = wrap.querySelector("code");
+    if (!btn || !code) return;
+    btn.addEventListener("click", function () {
+      var text = code.innerText;
+      function ok() { btn.textContent = "已复制"; btn.classList.add("ok"); setTimeout(function () { btn.textContent = "复制"; btn.classList.remove("ok"); }, 1400); }
+      function fallback() {
+        var r = document.createRange(); r.selectNodeContents(code);
+        var sel = window.getSelection(); sel.removeAllRanges(); sel.addRange(r);
+        btn.textContent = "已选中，按 Ctrl+C";
+        setTimeout(function () { btn.textContent = "复制"; }, 2200);
+      }
+      try {
+        if (navigator.clipboard && navigator.clipboard.writeText) { navigator.clipboard.writeText(text).then(ok, fallback); }
+        else { fallback(); }
+      } catch (e) { fallback(); }
+    });
+  });
+  render();
+})();
+</script>

@@ -8,6 +8,8 @@
 
 import argparse
 from pathlib import Path
+from experiment_utils import (build_joint_groups, select_groups, recording_name, configure_delay,
+                              actuator_metadata, validate_recording, freeze_unfitted_truth)
 
 from isaaclab.app import AppLauncher
 
@@ -16,25 +18,19 @@ parser = argparse.ArgumentParser(description="Pace agent for Isaac Lab environme
 parser.add_argument("--num_envs", type=int, default=4096, help="Number of environments to simulate.")
 parser.add_argument("--task", type=str, default="Isaac-Pace-S800-v0", help="Name of the task.")
 
-# ── 分组优化（手 / 腿 / 腰）──────────────────────────────────────────────
-# 每轮只优化一个组，其余组冻结在 --warm_start 给出的值上（不给就从 bounds 中点起步）。
-#
-# URDF 是三条挂在 LINK_BASE 上的独立支链（左腿 / 右腿 / 腰→双臂），基座焊死
-# （fix_root_link=True）⇒ 质量阵支链间块对角、损失可加：腿的结果不受臂/腰冻结值影响。
-# 但支链内耦合：torso 是双臂的父关节、臂对 torso 有反作用 ⇒ 这两个必须同一轮。
-#
-# 从零开始的顺序（不给 warm_start ⇒ 本组从中点全空间搜索）：
-#   python scripts/pace/fit.py --group legs --no-opt_delay
-#   python scripts/pace/fit.py --group arms,torso --warm_start logs/pace/s800_sim/<上一轮> --no-opt_delay
-#   python scripts/pace/fit.py --group all --warm_start logs/pace/s800_sim/<上一轮> --sigma 0.05
-# ② 的 warm_start 只是为了把腿的收敛值带进输出文件，臂/腰在它里面仍是中点，没有被热启动。
-# 分组阶段 --no-opt_delay：delay 是全局共享参数，会通过冻结组把它们的误差泄漏进来。
-#
-# 为什么分组：各关节力矩尺度差 ~45 倍（腕 coul/τ_applied≈5.8%，髋只有 0.04%），
-# 一套 bounds 尺度覆盖全部 109 维时必然牺牲一组 —— 实测全场统一 bounds 那轮，
-# 轻关节 0.1% 准、髋/膝摩擦 400% 错。分组还能把维度从 109 降到 ~49。
-# ⚠️ 验收指标看 TB 的 6_GroupResid/best_<组>（弧度 RMS），不是参数误差 ——
-#    参数误差已被证明被 kp·RMS残差 卡死（见 pace_sysid_notes）。
+# Only selected joints enter the optimization and loss. Other joints remain simulated.
+# Torso and arms are coupled: use a measured prior/warm start, or explicitly request
+# --freeze_unfitted_gt for a controlled sim-to-sim recovery experiment.
+parser.add_argument("--data", type=str, help="数据路径；相对路径从 data/ 起算。")
+parser.add_argument("--delay_mode", choices=("command", "torque"), default=None,
+                    help="默认跟随录制元数据；分组新实验默认 command。")
+parser.add_argument("--fix_delay", type=int, default=None, help="固定整数延时，不参与搜索。")
+parser.add_argument("--freeze_unfitted_gt", action="store_true",
+                    help="仅 sim-to-sim：未拟合组用记录真值冻结；本组仍从先验或 warm start 搜索。")
+parser.add_argument("--max_iterations", type=int, default=None)
+parser.add_argument("--save_interval", type=int, default=None)
+parser.add_argument("--seed", type=int, default=0)
+parser.add_argument("--log_dir", type=Path, default=None, help="日志根目录；每次运行仍创建独立子目录。")
 parser.add_argument("--group", type=str, default="all",
                     help="要优化的关节组，逗号分隔: all | legs | arms | torso（可组合，如 legs,torso）。")
 parser.add_argument("--warm_start", type=str, default=None,
@@ -46,8 +42,7 @@ parser.add_argument("--sigma", type=float, default=None,
                     help="覆盖 cfg 里的 CMA-ES 初始 sigma。warm_start 是「接着细化」时通常要调小。")
 parser.add_argument("--epsilon", type=float, default=None,
                     help="覆盖 cfg 的提前停止判据（种群 (max-min)/min < epsilon 即判收敛）。"
-                         "分组轮建议设 0 = 关掉：冻结组的常数偏移会把分母抬高、diff_score 被压低，"
-                         "可能被误判为收敛而提前结束；0 时 diff_score < 0 恒不成立，等于关闭。")
+                         "分组实验默认设 0 关闭提前停止，按指定迭代次数运行。")
 parser.add_argument("--floor_test", action="store_true",
                     help="一致性检查：把 bounds 收缩到数据文件里的注入真值 ±1e-6，只跑 1 代。"
                          "若采集与拟合在时间对齐/零偏/延时/初始状态上完全一致，真值参数应当能"
@@ -77,32 +72,31 @@ from pace_sim2real.utils import project_root
 from pace_sim2real import CMAESOptimizer
 
 
-def build_joint_groups(joint_order):
-    """按运动链把关节分成 腿 / 腰 / 臂 三组，返回 {组名: [joint_order 下标]}。
-
-    只按关节名分组，与参数无关 —— 每组的 armature/damping/friction/bias 一起优化。
-    ⚠️ 新加的关节若落不进任何一组会直接报错，而不是被静默漏掉。
-    """
-    groups = {"legs": [], "torso": [], "arms": []}
-    for i, name in enumerate(joint_order):
-        short = name.split("_", 1)[1] if "_" in name else name  # "J00_HIP_PITCH_L" -> "HIP_PITCH_L"
-        if any(k in short for k in ("HIP_", "KNEE_", "ANKLE_")):
-            groups["legs"].append(i)
-        elif short.startswith("TORSO"):
-            groups["torso"].append(i)
-        elif any(k in short for k in ("SHOULDER_", "ELBOW_", "WRIST_")):
-            groups["arms"].append(i)
-        else:
-            raise ValueError(f"关节 {name} 落不进任何一组，请更新 build_joint_groups()")
-    return groups
-
-
 def main():
     """Zero actions agent with Isaac Lab environment."""
     # parse configuration
     env_cfg = parse_env_cfg(
         args_cli.task, device=args_cli.device, num_envs=args_cli.num_envs
     )
+    env_cfg.seed = args_cli.seed
+    if args_cli.max_iterations is not None and args_cli.max_iterations < 1:
+        raise ValueError("max_iterations must be positive")
+    active_groups, selected = select_groups(args_cli.group, env_cfg.sim2real.joint_order)
+    group_label = "all" if active_groups is None else "_".join(active_groups)
+    default_mode = "command" if active_groups else "torque"
+    requested_mode = args_cli.delay_mode or default_mode
+    default_data = (Path(env_cfg.sim2real.data_dir) if active_groups is None else
+                    Path(env_cfg.sim2real.robot_name) / recording_name(args_cli.group, requested_mode))
+    data_file = Path(args_cli.data) if args_cli.data else default_data
+    if not data_file.is_absolute():
+        data_file = project_root() / "data" / data_file
+    data = torch.load(data_file, map_location="cpu", weights_only=True)
+    mode = args_cli.delay_mode or data.get("experiment", {}).get("delay_mode", default_mode)
+    configure_delay(env_cfg, mode)
+    if "self_collisions" in data.get("experiment", {}):
+        env_cfg.scene.robot.spawn.articulation_props.enabled_self_collisions = data["experiment"]["self_collisions"]
+    if env_cfg.decimation != 1:
+        raise ValueError("PACE replay requires decimation=1")
     # create environment
     env = gym.make(args_cli.task, cfg=env_cfg)
 
@@ -116,10 +110,10 @@ def main():
     joint_order = env_cfg.sim2real.joint_order
     sim_joint_ids = torch.tensor([articulation.joint_names.index(name) for name in joint_order], device=env.unwrapped.device, dtype=torch.int32)
 
-    data_file = project_root() / "data" / env_cfg.sim2real.data_dir
-    log_dir = project_root() / "logs" / "pace" / env_cfg.sim2real.robot_name
-
-    data = torch.load(data_file)
+    log_name = env_cfg.sim2real.robot_name if active_groups is None else f"{env_cfg.sim2real.robot_name}_{group_label}_{mode}"
+    log_dir = args_cli.log_dir or project_root() / "logs" / "pace" / log_name
+    validate_recording(data, joint_order, selected, actuator_metadata(env, env_cfg, sim_joint_ids, mode))
+    print(f"[experiment] {data_file}, group={group_label}, delay={mode}, loss joints={len(selected)}")
     time_data = data["time"].to(env.unwrapped.device)
     target_dof_pos = data["des_dof_pos"].to(env.unwrapped.device)
     measured_dof_pos = data["dof_pos"].to(env.unwrapped.device)
@@ -146,7 +140,7 @@ def main():
             raise SystemExit("[floor_test] 数据里的 joint_order 与 env cfg 不一致，先对齐再跑。")
         _gt_vec = torch.cat([_gt["armature"].flatten(), _gt["damping"].flatten(),
                              _gt["friction"].flatten(), _gt["bias"].flatten(),
-                             torch.tensor([float(_gt["delay"])])]).to(bounds_params.dtype)
+                             torch.tensor([float(_gt["delay"])])]).cpu().to(bounds_params.dtype)
         _eps = 1e-6 * _gt_vec.abs().clamp_min(1e-6)
         bounds_params = torch.stack([_gt_vec - _eps, _gt_vec + _eps], dim=1).to(bounds_params.device)
         print(f"[floor_test] bounds 已收缩到数据里的注入真值 ±1e-6 相对，只跑 1 代"
@@ -156,23 +150,8 @@ def main():
     groups = build_joint_groups(joint_order)
     print("[group] 分组: " + ", ".join(f"{g}={len(v)}关节" for g, v in groups.items()))
 
-    active_groups = [g.strip() for g in args_cli.group.split(",") if g.strip()]
-    if "all" in active_groups:
-        active_groups = None  # None = 全部（分组前的原行为）
-    else:
-        unknown = set(active_groups) - set(groups)
-        if unknown:
-            raise SystemExit(f"[group] 未知分组 {sorted(unknown)}，可用: all, {', '.join(groups)}")
-        frozen = [g for g in groups if g not in active_groups]
-        print(f"[group] 本轮只优化 {active_groups}，冻结 {frozen}"
-              f"{'（未给 --warm_start 时冻结值 = bounds 中点）' if not args_cli.warm_start else ''}")
-        # 提前停止判据在分组轮里会失灵：分数含冻结组的常数偏移 C，diff_score=(max-min)/min
-        # 的分母被抬高，判据被压低，可能把「还没收敛」误判成收敛。分数本身与优化无关
-        # （对全种群是同一个常数，排序不变），出问题的只有这个判据。
-        _eps = env_cfg.sim2real.cmaes.epsilon if args_cli.epsilon is None else args_cli.epsilon
-        if _eps and _eps > 0:
-            print(f"[group] ⚠️ epsilon={_eps:g} 仍开着：分组轮的 diff_score 被冻结组的常数"
-                  f"偏移压低，可能提前判收敛。长跑建议加 --epsilon 0 关掉。")
+    if active_groups and not args_cli.freeze_unfitted_gt and not args_cli.floor_test:
+        print("[group] 未拟合参数来自 warm_start 或 bounds 中点；torso/arms 的动力学耦合仍存在。")
 
     warm_start = None
     if args_cli.warm_start:
@@ -185,24 +164,51 @@ def main():
         warm_start = torch.load(ws_path, map_location="cpu")
         print(f"[group] warm_start = {ws_path}（{warm_start.numel()} 个参数）")
 
+    if args_cli.floor_test:
+        # Floor checks must initialize every frozen dimension at truth too.
+        warm_start = None
+    elif args_cli.freeze_unfitted_gt:
+        warm_start = freeze_unfitted_truth(bounds_params, data, joint_order, selected, warm_start)
+        print("[diagnostic] 非本组参数冻结为注入真值；这是条件参数恢复实验，不代表真机未知全参数辨识。")
+
+    if args_cli.fix_delay is not None:
+        delay = args_cli.fix_delay
+        if not bounds_params[-1, 0] <= delay <= bounds_params[-1, 1]:
+            raise ValueError("fix_delay outside parameter bounds")
+        if delay > min(a.max_delay for a in env_cfg.scene.robot.actuators.values()):
+            raise ValueError("fix_delay exceeds actuator buffer")
+        bounds_params[-1] = torch.tensor([delay - 1e-6, delay + 1e-6], device=bounds_params.device)
+        if warm_start is not None:
+            warm_start[-1] = delay
+        args_cli.opt_delay = False
+
+    # Rest/taper and heterogeneous chirps cannot use the old time-to-frequency labels.
+    segment_edges = () if "experiment" in data else env_cfg.sim2real.cmaes.segment_edges_hz
+    data["fit"] = {"groups": active_groups, "fitted_joints": selected,
+                   "freeze_unfitted_gt": args_cli.freeze_unfitted_gt, "floor_test": args_cli.floor_test,
+                   "data_file": str(data_file), "delay_mode": mode, "seed": args_cli.seed,
+                   "fix_delay": args_cli.fix_delay, "warm_start": args_cli.warm_start}
+
     opt = CMAESOptimizer(
         bounds=bounds_params,
         groups=groups,
         active_groups=active_groups,
         warm_start=warm_start,
         opt_delay=args_cli.opt_delay,
+        loss_joints=selected,
+        seed=args_cli.seed,
         population_size=env.unwrapped.num_envs,
         log_dir=log_dir,
         joint_order=joint_order,
-        max_iteration=1 if args_cli.floor_test else env_cfg.sim2real.cmaes.max_iteration,
+        max_iteration=1 if args_cli.floor_test else (env_cfg.sim2real.cmaes.max_iteration if args_cli.max_iterations is None else args_cli.max_iterations),
         data=data,
         device=env.unwrapped.device,
         epsilon=0.0 if args_cli.floor_test else (
-            env_cfg.sim2real.cmaes.epsilon if args_cli.epsilon is None else args_cli.epsilon),
+            (0.0 if active_groups else env_cfg.sim2real.cmaes.epsilon) if args_cli.epsilon is None else args_cli.epsilon),
         sigma=env_cfg.sim2real.cmaes.sigma if args_cli.sigma is None else args_cli.sigma,
-        save_interval=env_cfg.sim2real.cmaes.save_interval,
+        save_interval=env_cfg.sim2real.cmaes.save_interval if args_cli.save_interval is None else args_cli.save_interval,
         save_optimization_process=env_cfg.sim2real.cmaes.save_optimization_process,
-        segment_edges_hz=env_cfg.sim2real.cmaes.segment_edges_hz,
+        segment_edges_hz=segment_edges,
         sweep_kind=env_cfg.sim2real.cmaes.sweep_kind,
     )
 
@@ -239,7 +245,7 @@ def main():
     if args_cli.floor_test:
         _s = opt.scores_buffer[0]                     # 第 1 代全种群的分数
         _best, _worst = _s.min().item(), _s.max().item()
-        _n_j = len(joint_order)
+        _n_j = len(selected)
         _rms = (_best / max(_n_j, 1)) ** 0.5          # 折成逐关节 RMS 残差 [rad]
         _at_floor = int((_s < 1e-10).sum())
         print("\n" + "=" * 72)
@@ -255,7 +261,7 @@ def main():
         _bi = int(torch.argmin(_s).item())
         _sim_best = opt.sim_dof_pos_buffer[_bi].cpu()                 # (T, n)
         _real = data["dof_pos"].cpu() + _gt["bias"].unsqueeze(0)      # 真实位置 = 记录值 + 零位
-        _res = (_sim_best - _real).abs()
+        _res = (_sim_best - _real)[:, selected].abs()
         _w = max(1, int(0.05 * _res.shape[0]))                        # 前 5% 步（约 1 s）
         _early = float(_res[:_w].pow(2).mean().sqrt())
         _late = float(_res[-_w:].pow(2).mean().sqrt())
@@ -268,9 +274,7 @@ def main():
         if _jump >= 0:
             print(f"              首次冲击（残差跳出 50×开局）出现在第 {_jump} 步 "
                   f"= {float(data['time'][_jump]):.2f} s")
-        print("              判读：开局就在 1e-8 量级 ⇒ **口径一致**；之后被冲击抬高的部分"
-              "来自非光滑事件")
-        print("              （限位冲击/自碰撞/自激），要靠改激励设计解决，不是改代码。")
+        print("              开局吻合只验证初期时序；是否通过以完整轨迹损失为准。")
 
         # 判定看 min：口径一致时**存在**一组参数能逐位复现数据。用 max 判会被整数量化
         # 误伤 —— 框收缩到真值 ±1e-6 时，若真值压在延时格子边界上，一半样本会取到相邻的
@@ -278,17 +282,13 @@ def main():
         if _best < 1e-10:
             print("    ✓ PASS —— 采集与拟合口径一致（时间对齐/零偏/延时/初始状态）")
             if _at_floor < _s.numel():
-                print(f"    （{_s.numel() - _at_floor} 个样本没到地板：多半是延时落在整数格子"
-                      f"边界上被取到相邻值，或系统本身有自激/强非线性。看 min 即可。）")
-        elif _early < 1e-6:
-            print("    ✓ 口径一致（开局在浮点地板）—— 但轨迹里有非光滑事件，全局阈值到不了。")
-            print("      这不是流程的问题：真值参数已经能复现数据，只是某处有接触/限位冲击。")
-            print("      ⇒ 可以继续拟合；受影响的是那几个被冲击的关节。要拿到干净地板就改激励。")
+                print(f"    （{_s.numel() - _at_floor} 个样本未达到阈值，仍需检查数值敏感性及接触/限位事件。）")
         else:
-            print("    ✗ FAIL —— 两边口径有系统性差异（开局就没到地板），先别往下拟合。常见原因：")
+            print("    ✗ FAIL —— 全程回放未达到一致性阈值，请先检查以下原因：")
             print("      · 数据是用**别的 cfg** 采的（增益/URDF/sim_dt 改过之后没重采）")
             print("      · 初始状态或时间对齐差一步（des_dof_pos 与 dof_pos 错位）")
             print("      · 代码里的真值常量与注入值不一致（本检查读的是数据里的 gt，不是常量）")
+            print("      · 接触/限位事件，或动力学对参数微扰的敏感性")
             raise SystemExit(1)
         print("=" * 72)
 

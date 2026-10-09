@@ -12,8 +12,10 @@ from datetime import datetime
 import os
 
 class CMAESOptimizer:
-    def __init__(self, bounds, population_size, log_dir, joint_order, max_iteration, data, device, epsilon=None, sigma=0.5, save_interval=10, save_optimization_process=False, segment_edges_hz=(0.1, 4.0), sweep_kind="linear", groups=None, active_groups=None, warm_start=None, opt_delay=True):
+    def __init__(self, bounds, population_size, log_dir, joint_order, max_iteration, data, device, epsilon=None, sigma=0.5, save_interval=10, save_optimization_process=False, segment_edges_hz=(0.1, 4.0), sweep_kind="linear", groups=None, active_groups=None, warm_start=None, opt_delay=True, loss_joints=None, seed=0):
 
+        if max_iteration < 1 or population_size < 2:
+            raise ValueError("Need max_iteration>=1 and population_size>=2")
         self.joint_order = joint_order
         self.max_iteration = max_iteration
         self.epsilon = epsilon
@@ -28,7 +30,7 @@ class CMAESOptimizer:
         log_dir = os.path.join(log_dir, folder_time)
         os.makedirs(log_dir, exist_ok=True)
         self.writer = TensorboardSummaryWriter(log_dir=log_dir)
-        torch.save({"bounds": bounds,
+        torch.save({**data, "bounds": bounds,
                     "joint_order": joint_order,
                     "dof_pos": data["dof_pos"],
                     "des_dof_pos": data["des_dof_pos"],
@@ -58,20 +60,10 @@ class CMAESOptimizer:
         self.bias_idx = slice(3 * num_joints, 4 * num_joints)
         self.delay_idx = 4 * num_joints
 
-        # ── 分组优化（手 / 腿 / 腰）─────────────────────────────────────────
-        # 每轮只搜一个组的参数（其余组冻结在 warm_start 上），子空间里单独建 CMA-ES。
-        #
-        # 为什么分组：各关节的力矩尺度差 ~45 倍（腕 coul/τ_applied ≈ 5.8%，
-        # 髋只有 0.04%），一个 bounds 尺度 + 一个 σ 覆盖全部 109 维时，必然有一组
-        # 被牺牲（实测：全场统一 bounds 那轮，轻关节 0.1% 准、髋/膝摩擦 400% 错）。
-        # 分组还能把维度从 109 降到 ~49，CMA-ES 收敛更好 → 残差底更低 → 摩擦误差
-        # 按 Δτ_f ≈ kp·残差 成比例下降。
-        #
-        # ⚠️ 损失仍然在全部 27 个关节上算，不按组裁剪。基座焊死 ⇒ 质量阵在支链
-        #    （左腿/右腿/腰→双臂）之间块对角、损失可加，所以对「腿 vs 臂」这与裁剪
-        #    等价、留着更简单；但支链内部（torso 是双臂的父关节）有耦合，必须保留。
-        # ⚠️ 验收指标是「残差」不是参数误差：TB 6_GroupResid/best_<组>（弧度 RMS）。
-        #    参数误差已经被证明被 kp·残差 卡死，抠它收益很低。
+        self.loss_joints = list(range(num_joints)) if loss_joints is None else list(loss_joints)
+        if not self.loss_joints or min(self.loss_joints) < 0 or max(self.loss_joints) >= num_joints:
+            raise ValueError("Invalid loss joint indices")
+        # Mask losses as well as parameters; unexcited joints still evolve physically.
         self.groups = {k: [int(j) for j in v] for k, v in
                        (groups if groups else {"all": list(range(num_joints))}).items()}
         self.group_idx = {k: torch.tensor(v, dtype=torch.long, device=device) for k, v in self.groups.items()}
@@ -119,7 +111,7 @@ class CMAESOptimizer:
         _sub_norm = torch.ones_like(_sub)
         _sub_norm[:, 0] *= -1
         self.optimizer = cmaes.CMA(mean=self.z_ref[self.active_idx].cpu().numpy(), sigma=sigma,
-                                   bounds=_sub_norm.cpu().numpy(), seed=0, population_size=population_size)
+                                   bounds=_sub_norm.cpu().numpy(), seed=seed, population_size=population_size)
         _frozen_n = bounds.shape[0] - len(_act)
         print(f"[group] active={len(_act)} 维 / {len(_act_joints)} 关节"
               f"（{'含' if opt_delay else '不含'} delay），冻结 {_frozen_n} 维")
@@ -164,7 +156,8 @@ class CMAESOptimizer:
         return self.optimizer.ask()
 
     def tell(self, sim_dof_pos, real_dof_pos):
-        err_sq = torch.sum(torch.square(sim_dof_pos - real_dof_pos - self.sim_params[:, self.bias_idx]), dim=1)
+        residual = sim_dof_pos - real_dof_pos - self.sim_params[:, self.bias_idx]
+        err_sq = torch.sum(residual[:, self.loss_joints].square(), dim=1)
         self.scores += err_sq
         # 同步累加分段损失。纯诊断 —— CMA-ES 只看到上面的 self.scores。
         if self.seg_scores is not None:
@@ -185,6 +178,9 @@ class CMAESOptimizer:
         self.scores_buffer[self.iteration_counter, :] = self.scores
         if self.save_optimization_process:
             self.sim_params_buffer[self.iteration_counter, :, :] = self.sim_params
+        best = int(torch.argmin(self.scores))
+        self._last_best_params = self.sim_params[best].detach().cpu().clone()
+        self._last_best_trajectory = self.sim_dof_pos_buffer[best].detach().cpu().clone()
         solutions = []
         for i in range(self.optimizer.population_size):
             # 只把 active 子空间交给 CMA-ES（冻结维不进 tell）
@@ -346,9 +342,8 @@ class CMAESOptimizer:
                 self.writer.add_scalar("5_BandLoss/share_" + tag, band_share[:, s].mean().item(), self.iteration_counter)
 
     def save_checkpoint(self, mean, iteration, finished=False):
-        min_index = torch.argmin(self.scores_buffer[iteration, :])
-        best_traj = self.sim_dof_pos_buffer[min_index].detach().clone()
-        best_traj = best_traj.cpu()
+        best_traj = self._last_best_trajectory
+        torch.save(self._last_best_params, os.path.join(self.writer.log_dir, "best_params.pt"))
         torch.save(best_traj, os.path.join(self.writer.log_dir, "best_trajectory.pt"))
         torch.save(mean, os.path.join(self.writer.log_dir, "mean_" + f"{iteration:03}" + ".pt"))
         if finished and self.save_optimization_process:

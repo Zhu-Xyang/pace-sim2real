@@ -96,6 +96,9 @@ xxx.usda # path to usd file
 
 ### 2. Collect excitation data
 
+S800 的腿／躯干／双臂分组实验见 [分组扫频与辨识指南](docs/s800_single_part.md)。
+该流程分别采集三组数据，仅优化并评价本组，默认使用参考指令延时；与下方全身基线区分。
+
 (Alternatively, place your own real-world data in `data/`)
 
 ```bash

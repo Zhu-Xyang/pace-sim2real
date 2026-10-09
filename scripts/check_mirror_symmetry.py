@@ -98,18 +98,13 @@ def world_axes(urdf_path: Path) -> dict[str, np.ndarray]:
 
 
 def parse_collector(path: Path) -> tuple[list[float], list[float], list[float]]:
-    """从 data_collection.py 取出 directions / bias / scale（跳过注释行）。"""
-    src = "\n".join(l for l in path.read_text().split("\n") if not l.strip().startswith("#"))
+    """Use the collector's shared nominal centers/amplitudes without launching Isaac."""
+    sys.path.insert(0, str(path.parent))
+    from s800_motion import nominal_motion
 
-    def grab(name: str) -> list[float]:
-        i = src.index(f"{name} = torch.tensor(")
-        j = src.index("device=", i)
-        body = src[i:j]
-        body = body[body.index("[") + 1 : body.rindex("]")]
-        body = re.sub(r"#.*", "", body)
-        return [float(x) for x in re.findall(r"[-+]?\d+\.?\d*", body)]
-
-    return grab("trajectory_directions"), grab("trajectory_bias"), grab("trajectory_scale")
+    center, amplitude = (x.numpy().astype(float) for x in nominal_motion(JOINT_ORDER))
+    # Compatibility with the algebra used below: (wave+bias)*direction*scale.
+    return np.sign(amplitude).tolist(), (center/amplitude).tolist(), np.abs(amplitude).tolist()
 
 
 def main() -> int:

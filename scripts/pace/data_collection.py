@@ -7,6 +7,10 @@
 """Launch Isaac Sim Simulator first."""
 
 import argparse
+from pathlib import Path
+from datetime import datetime
+import json
+from experiment_utils import (select_groups, recording_name, configure_delay, group_chirp, actuator_metadata)
 
 from isaaclab.app import AppLauncher
 
@@ -16,9 +20,29 @@ parser.add_argument("--num_envs", type=int, default=1, help="Number of environme
 # parser.add_argument("--task", type=str, default="Isaac-Pace-Anymal-D-v0", help="Name of the task.")
 parser.add_argument("--task", type=str, default="Isaac-Pace-S800-v0", help="Name of the task.")
 parser.add_argument("--min_frequency", type=float, default=0.1, help="Minimum frequency for the chirp signal in Hz.")
-parser.add_argument("--max_frequency", type=float, default=4.0, help="Maximum frequency for the chirp signal in Hz. Ignored per-joint when --grouped-sweep is on (the default); used as the uniform fallback otherwise. ⚠️ 改这里必须同步改 pace_sim2real_env_cfg.py 的 segment_edges_hz（首尾须一致）。")
-parser.add_argument("--grouped_sweep", action=argparse.BooleanOptionalAction, default=False, help="EXPERIMENTAL, off by default. Gives each joint its own sweep ceiling (3 Hz slow / 6 Hz fast) plus a per-joint phase offset. Measured to be WORSE than the uniform sweep: fast joints mistrack and the out-of-phase legs collide with each other. Enable with --grouped-sweep only if you also make L/R symmetric joints share a phase.")
+parser.add_argument("--max_frequency", type=float, default=4.0, help="统一扫频上限 Hz；--grouped_sweep 开启时使用逐关节上限。")
+parser.add_argument("--grouped_sweep", action=argparse.BooleanOptionalAction, default=False,
+                    help="使用逐关节 3/6 Hz 上限，左右对应关节同相位；与 --group 的部位分组不同。")
 parser.add_argument("--duration", type=float, default=20.0, help="Duration of the chirp signal in seconds.")
+parser.add_argument("--group", choices=("all", "legs", "torso", "arms"), default="all",
+                    help="只激励这一组，其余关节维持中心目标；arms 含手腕、不含手指。")
+parser.add_argument("--delay_mode", choices=("command", "torque"), default=None,
+                    help="分组实验默认 command；原全身实验默认 torque。")
+parser.add_argument("--delay_steps", type=int, default=5, help="仿真注入的整数延时步数。")
+parser.add_argument("--rest", type=float, default=1.0, help="扫频前后各静止多少秒。")
+parser.add_argument("--ramp", type=float, default=2.0, help="扫频首尾各淡入淡出多少秒。")
+parser.add_argument("--self_collisions", action=argparse.BooleanOptionalAction, default=None,
+                    help="clearance 默认开启自碰撞；原轨迹两种 profile 分组默认关闭，全身沿用 cfg。")
+parser.add_argument("--plot", action=argparse.BooleanOptionalAction, default=True,
+                    help="采集后默认显示位置、力矩、速度三张诊断图；--no-plot 可关闭。")
+parser.add_argument("--output", type=str, default=None, help="输出路径，相对路径从 data/ 起算。")
+parser.add_argument("--trajectory_profile", choices=("scaled_legacy", "clearance", "legacy"), default="scaled_legacy",
+                    help="默认恢复原轨迹并降低 scale；clearance 为外展间隙方案，legacy 为未缩放原轨迹。")
+parser.add_argument("--scale_factor", type=float, default=None,
+                    help="仅 scaled_legacy 使用：本组原 scale 的乘数 (0,1]；legs/all 默认 0.8，上身组默认 1。")
+parser.add_argument("--clearance_margin", type=float, default=0.02, help="腿间和离地最小保守间隙 [m]。")
+parser.add_argument("--trajectory_plan", type=Path, default=None, help="读取之前保存的 trajectory.json 中的中心和幅值，仍须通过检查。")
+parser.add_argument("--seed", type=int, default=0, help="仿真环境随机种子。")
 # ── 对照组：全场统一 GT ──────────────────────────────────────────────────
 # 目的：隔离「搜索维度」这一个变量。
 # ANYmal 的 round-trip 能到 <1%，一个尚未排除的原因是它的 GT 全场统一
@@ -51,7 +75,6 @@ import torch
 
 import isaaclab_tasks  # noqa: F401
 from isaaclab_tasks.utils import parse_env_cfg
-from torch import pi
 
 import pace_sim2real.tasks  # noqa: F401
 from pace_sim2real.utils import project_root
@@ -61,6 +84,23 @@ def main():
     env_cfg = parse_env_cfg(
         args_cli.task, device=args_cli.device, num_envs=args_cli.num_envs
     )
+    if args_cli.num_envs != 1:
+        raise ValueError("Data collection requires --num_envs 1")
+    env_cfg.seed = args_cli.seed
+    if env_cfg.sim2real.robot_name != "s800_sim":
+        raise ValueError("This collector contains S800-specific truth and trajectories")
+    if args_cli.scale_factor is not None and (args_cli.trajectory_profile != "scaled_legacy" or args_cli.trajectory_plan):
+        raise ValueError("scale_factor requires scaled_legacy without a trajectory_plan")
+    mode = args_cli.delay_mode or ("command" if args_cli.group != "all" else "torque")
+    configure_delay(env_cfg, mode)
+    if args_cli.self_collisions is not None:
+        env_cfg.scene.robot.spawn.articulation_props.enabled_self_collisions = args_cli.self_collisions
+    elif args_cli.trajectory_profile == "clearance":
+        env_cfg.scene.robot.spawn.articulation_props.enabled_self_collisions = True
+    elif args_cli.group != "all":
+        env_cfg.scene.robot.spawn.articulation_props.enabled_self_collisions = False
+    if env_cfg.decimation != 1:
+        raise ValueError("PACE recording requires decimation=1")
     # create environment
     env = gym.make(args_cli.task, cfg=env_cfg)
 
@@ -135,7 +175,15 @@ def main():
 
     bias = torch.tensor([0.05] * 27, device=env.unwrapped.device).unsqueeze(0)
 
-    time_lag = torch.tensor([[3]], dtype=torch.int, device=env.unwrapped.device)
+    time_lag = torch.tensor([args_cli.delay_steps], dtype=torch.int, device=env.unwrapped.device)
+    _, selected = select_groups(args_cli.group, joint_order)
+    gt_vector = torch.cat([x.flatten() for x in (armature, damping, friction, bias, time_lag)])
+    bounds = env_cfg.sim2real.bounds_params.to(gt_vector.device)
+    if torch.any(gt_vector < bounds[:, 0]) or torch.any(gt_vector > bounds[:, 1]):
+        raise ValueError("Injected truth is outside the fitting bounds")
+    if not 0 <= args_cli.delay_steps <= min(a.max_delay for a in env_cfg.scene.robot.actuators.values()):
+        raise ValueError("delay_steps outside actuator capacity")
+    print(f"[experiment] group={args_cli.group}, joints={len(selected)}, delay={mode}/{args_cli.delay_steps} steps")
 
     env.reset()
 
@@ -145,10 +193,11 @@ def main():
     articulation.data.joint_viscous_friction_coeff[:, joint_ids] = damping
     # note: modeling coulomb friction if joint_friction = joint_dynamic_friction
     # If we set static friction lower than dynamic friction, the sim complains. So we need to do this weird order.
-    articulation.write_joint_dynamic_friction_coefficient_to_sim(friction, joint_ids=joint_ids, env_ids=torch.tensor([0], device=env.unwrapped.device, dtype=torch.int32))
+    articulation.write_joint_dynamic_friction_coefficient_to_sim(torch.zeros_like(friction), joint_ids=joint_ids, env_ids=torch.tensor([0], device=env.unwrapped.device, dtype=torch.int32))
     articulation.data.joint_dynamic_friction_coeff[:, joint_ids] = friction
     articulation.write_joint_friction_coefficient_to_sim(friction, joint_ids=joint_ids, env_ids=torch.tensor([0], device=env.unwrapped.device, dtype=torch.int32))
     articulation.data.joint_friction_coeff[:, joint_ids] = friction
+    articulation.write_joint_dynamic_friction_coefficient_to_sim(friction, joint_ids=joint_ids)
     drive_types = articulation.actuators.keys()
     for drive_type in drive_types:
         drive_indices = articulation.actuators[drive_type].joint_indices
@@ -168,7 +217,7 @@ def main():
     duration = args_cli.duration  # seconds
     sample_rate = 1 / env.unwrapped.sim.get_physics_dt()  # Hz
     num_steps = int(duration * sample_rate)
-    t = torch.linspace(0, duration, steps=num_steps, device=env.unwrapped.device)
+    t = torch.arange(num_steps, device=env.unwrapped.device) / sample_rate
     f0 = args_cli.min_frequency  # Hz
     f1 = args_cli.max_frequency  # Hz
 
@@ -197,115 +246,61 @@ def main():
     if not args_cli.grouped_sweep:
         f1_per_joint[:] = f1   # 关闭分组时退回全场统一 f1
 
-    # 逐关节独立相位 —— 仅用于诊断激励共线，默认关闭。
-    # ⚠️ 实测代价：左右腿失去同步，HIP_ROLL 左右反向摆动导致**双腿互撞**；且跟踪变差。
-    # 注意 cond(X^T X) 只是「指令矩阵」的条件数，是可辨识性的代理指标而非判据 ——
-    # fit.py 匹配的是仿真轨迹，参数→轨迹经过非线性刚体动力学，各关节惯量/耦合都不同，
-    # 指令共线并不等于参数不可辨识（上游 ANYmal 12 个关节指令全同，照样能辨识）。
-    # 若要用，必须把左右对称关节设成同相位，否则会撞腿。
-    if args_cli.grouped_sweep:
-        phase_offset = 2 * pi * torch.arange(len(joint_ids), device=env.unwrapped.device) / len(joint_ids)
-    else:
-        phase_offset = torch.zeros(len(joint_ids), device=env.unwrapped.device)
+    from s800_motion import nominal_motion, scaled_nominal_motion, choose_leg_motion
+    from s800_clearance import LegClearance, with_midpoints
+    center, amplitude = nominal_motion(joint_order)
+    scale_factor = None
+    if args_cli.trajectory_profile == "scaled_legacy" and not args_cli.trajectory_plan:
+        scale_factor = args_cli.scale_factor if args_cli.scale_factor is not None else (.8 if args_cli.group in ("legs", "all") else 1.)
+        center, amplitude = scaled_nominal_motion(joint_order, selected, scale_factor)
+        print(f"[trajectory] original normalized bias/direction, scale factor={scale_factor}; no collision-free guarantee", flush=True)
+    # Compute the normalized waveform on the actual simulation device first.
+    t, wave = group_chirp(1 / sample_rate, duration, args_cli.rest, args_cli.ramp,
+                         f0, f1_per_joint, torch.zeros(len(joint_order), device=env.unwrapped.device),
+                         torch.ones(len(joint_order), device=env.unwrapped.device), selected)
+    checker = None
+    planned_report = None
+    if args_cli.trajectory_profile == "clearance":
+        checker = LegClearance(project_root() / "assets_robot/engineai_S800/urdf/serial_s800.urdf",
+                               joint_order, base_height=env_cfg.scene.robot.init_state.pos[2])
+    if args_cli.trajectory_plan:
+        plan = json.loads(args_cli.trajectory_plan.read_text())
+        if plan["joint_order"] != list(joint_order):
+            raise ValueError("Trajectory plan joint order differs from environment")
+        center = torch.tensor(plan["center_rad"], dtype=torch.float32)
+        amplitude = torch.tensor(plan["signed_amplitude_rad"], dtype=torch.float32)
+        if center.shape != (len(joint_order),) or amplitude.shape != center.shape:
+            raise ValueError("Invalid trajectory plan dimensions")
+        if not torch.isfinite(center).all() or not torch.isfinite(amplitude).all():
+            raise ValueError("Nonfinite trajectory plan")
+    elif checker is not None:
+        center, amplitude, planned_report = choose_leg_motion(
+            checker, wave.cpu().numpy(), center.numpy(), amplitude.numpy(), bias[0].cpu().numpy(),
+            selected, args_cli.clearance_margin)
+    commands = center.to(wave.device) + wave * amplitude.to(wave.device)
+    if checker is not None:
+        # Check the final float32 commands too (including an explicit user plan).
+        physical_targets = (commands + bias).cpu().numpy()
+        planned_report = checker.check(with_midpoints(physical_targets), margin=args_cli.clearance_margin + .03)
+        planned_report.update(planning_reserve_m=.03, midpoint_checks=True,
+                              continuous_collision_certificate=False)
+        if not planned_report["passed"]:
+            raise ValueError(f"Command trajectory failed clearance checks: {planned_report}")
+        print(f"[clearance] planned={planned_report}", flush=True)
+    print(f"[trajectory] center(rad)={center.tolist()}", flush=True)
+    print(f"[trajectory] signed amplitude(rad)={amplitude.tolist()}", flush=True)
+    num_steps = len(t)
+    trajectory = torch.zeros((num_steps, articulation.num_joints), device=env.unwrapped.device)
+    trajectory[:, joint_ids] = commands
+    metadata = actuator_metadata(env, env_cfg, joint_ids, mode)
+    metadata.update(group=args_cli.group, rest=args_cli.rest, ramp=args_cli.ramp,
+                    duration=duration, f0=f0, f1_per_joint=f1_per_joint.cpu(),
+                    trajectory_profile=args_cli.trajectory_profile, center_rad=center.cpu(),
+                    signed_amplitude_rad=amplitude.cpu(), planned_clearance=planned_report,
+                    scale_factor=scale_factor)
 
-    # 线性 chirp: phase_k(t) = 2*pi*(f0*t + (f1_k-f0)/(2*duration)*t^2) + phi_k
-    # t[:, None] -> (num_steps,1)，f1_per_joint[None,:] -> (1,27)，广播成 (num_steps,27)
-    phase = (
-        2 * pi * (f0 * t[:, None] + ((f1_per_joint[None, :] - f0) / (2 * duration)) * t[:, None] ** 2)
-        + phase_offset[None, :]
-    )
-    chirp_signal = torch.sin(phase)   # (num_steps, 27)，按 joint_order 排列
-
-    # 索引方向：trajectory 的列是「仿真关节顺序」，而 joint_order/bias/scale 是「配置顺序」。
-    # joint_ids[j] = 配置关节 j 对应的仿真列号，故用 trajectory[:, joint_ids] = X
-    # 把 X 的第 j 列写到仿真列 joint_ids[j]。
-    trajectory = torch.zeros((num_steps, len(joint_ids)), device=env.unwrapped.device)
-    trajectory[:, joint_ids] = chirp_signal
-    # ===========anymal quadrupedal============
-    # for anymal quadrupedal robot
-    # trajectory_directions = torch.tensor(
-    #     [1.0, 1.0, 1.0, -1.0, 1.0, 1.0, 1.0, -1.0, -1.0, -1.0, -1.0, -1.0],
-    #     device=env.unwrapped.device
-    # )
-    # trajectory_bias = torch.tensor(
-    #     [0.0, 0.4, 0.8] * 4,
-    #     device=env.unwrapped.device
-    # )
-    # trajectory_scale = torch.tensor(
-    #     [0.25, 0.5, -2.0] * 4,
-    #     device=env.unwrapped.device
-    # )
-    # ==============================
-
-    # ===========s800==============
-    # ── directions：把激励整形成镜像对称（左半为基准，右半取符号）───────────
-    # 判据（矢状面反射 M = diag(1,-1,1)，a = 关节在 q=0 时的世界系轴）：
-    #     a_R == +M·a_L  →  dir_R = -1   （轴落在镜面内：roll / yaw）
-    #     a_R == -M·a_L  →  dir_R = +1   （轴沿镜面法向：pure pitch）
-    # 依据：反射是反向的，绕 a_L 转 θ 镜像成绕 M·a_L 转 -θ。
-    #
-    # ⚠️ 不要用「两个轴向量是否相同」当判据 —— 那只在轴落在镜面内时成立。
-    #    纯 pitch 轴如 (0,1,0) 满足 M·a_L = -a_L，两向量「看起来一样」，
-    #    但它恰恰是需要 +1 的镜像情形（左右膝应同向弯曲）。
-    #    这五处曾按错误判据写成反向：KNEE_PITCH / ANKLE_PITCH / SHOULDER_YAW /
-    #    ELBOW_YAW / WRIST_ROLL（已修正）。
-    # 校验: python scripts/check_mirror_symmetry.py   （退出码 0 = 全部通过）
-    trajectory_directions = torch.tensor(
-        [  1,  1,  1,  1,  1,  1,      # 左腿（基准，全部 +1）
-        1, -1, -1,  1,  1, -1,     # 右腿: HIP_P, HIP_R, HIP_Y, KNEE, ANK_P, ANK_R
-        1,                          # 腰
-        1,  1,  1,  1,  1,  1,  1, # 左臂（基准，全部 +1）
-        1, -1, -1,  1, -1,  1, -1  # 右臂: SH_P, SH_R, SH_Y, ELB_P, ELB_Y, WR_P, WR_R
-        ],
-        device=env.unwrapped.device
-    )
-
-    # bias: 0 for symmetric joints, URDF center for asymmetric (knee/ankle_roll/shldr_roll/elbow_pitch/wrist_roll)
-    # bias 与 direction 必须配套：镜像激励要求 q_R(t) = σ·q_L(t)，σ = ∓1 由上面的
-    # directions 承载。所以 bias 和 scale 左右必须「相等」。
-    # ⚠️ 右腿 KNEE 的 bias 曾写成 -1.046（想用 bias 反号去补 directions 写反的 dir），
-    #    那是错的：bias 反号 + dir 反号 得到的是「反相」，不是镜像。
-    #    现在 directions 已按正确判据修正，bias 恢复成与左腿相等。
-    trajectory_bias = torch.tensor(
-        [0.000, 0.150, 0.000, 1.046, 0.000, -0.087,  # 左腿
-        0.000, 0.150, 0.000, 1.046, 0.000, -0.087,  # 右腿（与左腿相等）
-        0.000,                                        # 腰
-        0.000, 1.052, 0.000, -1.004, 0.000, 0.000, -0.131,  # 左臂
-        0.000, 1.052, 0.000, -1.004, 0.000, 0.000, -0.131], # 右臂（与左臂相等）
-        device=env.unwrapped.device
-    )
-
-    # trajectory_bias = torch.tensor(
-    #     [0.000, 0.000, 0.000, 1.046, 0.000, -0.087,  # 左腿
-    #      0.000, 0.000, 0.000, -1.046, 0.000,  0.087,  # 右腿
-    #      0.000,                                        # 腰
-    #      0.000, 1.052, 0.000, -1.004, 0.000, 0.000, -0.131,  # 左臂
-    #      0.000, 1.052, 0.000, 1.004, 0.000, 0.000,  0.131],  # 右臂
-    #     device=env.unwrapped.device
-    # )
-
-    # scale: min(half_range * 0.4, 80% torque limit, phys_cap)
-    # round-trip baseline: 手臂幅度整体下调。手腕是被肩/肘甩着走的（实测跟随度 604%），
-    # 所以减小手腕自身指令没用，必须减小肩肘幅度才能压住手腕撞击 hip 的问题。
-    #
-    # HIP_ROLL 曾从 0.30 降到 0.20，理由是"kpkd 增益下它 ω_n=1.05Hz/ζ=0.096 最欠阻尼"。
-    # 但那组数字是 kpkd 增益下的；换回 I_total 校正增益后它 ω_n=2.03Hz/ζ=0.320 已健康，
-    # 降幅只剩副作用 —— round-trip 实测 HIP_ROLL 是全场最差（armature 13.6%、
-    # viscous 26.3%，是第二名的 6 倍），因为激励幅度砍掉 1/3 导致信噪比不足。恢复 0.30。
-    trajectory_scale = torch.tensor(
-        [0.500, 0.300, 0.700, 0.500, 0.272, 0.105,  # 左腿 (HIP_ROLL 恢复 0.30)
-         0.500, 0.300, 0.700, 0.500, 0.272, 0.105,  # 右腿
-         0.400,                                       # 腰
-         0.350, 0.300, 0.250, 0.300, 0.15, 0.05, 0.05,  # 左臂 (肩肘 0.60/0.40 → 0.35/0.30/0.25)
-         0.350, 0.300, 0.250, 0.300, 0.15, 0.05, 0.05],  # 右臂
-        device=env.unwrapped.device
-    )
-    # ===========================
-
-    trajectory[:, joint_ids] = (trajectory[:, joint_ids] + trajectory_bias.unsqueeze(0)) * trajectory_directions.unsqueeze(0) * trajectory_scale.unsqueeze(0)
-
-    articulation.write_joint_position_to_sim(trajectory[0, :].unsqueeze(0) + bias[0, joint_ids])
-    articulation.write_joint_velocity_to_sim(torch.zeros((1, len(joint_ids)), device=env.unwrapped.device))
+    articulation.write_joint_position_to_sim(commands[0].unsqueeze(0) + bias, joint_ids=joint_ids)
+    articulation.write_joint_velocity_to_sim(torch.zeros_like(bias), joint_ids=joint_ids)
 
     counter = 0
     # simulate environment
@@ -326,13 +321,27 @@ def main():
             actions = trajectory[counter % num_steps, :].unsqueeze(0).repeat(env.unwrapped.num_envs, 1)
             # apply actions
             obs, _, _, _, _ = env.step(actions)
-            dof_target_pos_buffer[counter, :] = robot._data.joint_pos_target[0, joint_ids]
+            dof_target_pos_buffer[counter, :] = commands[counter]
             counter += 1
             if counter % 400 == 0:
                 print(f"[INFO]: Step {counter/sample_rate} seconds")
             if counter >= num_steps:
                 break
 
+    if counter != num_steps:
+        raise RuntimeError("Simulation stopped before completing the recording")
+    # Include the final post-step state in geometry checks, even though position
+    # identification uses pre-step samples. Geometry never uses encoder readings directly.
+    actual_report = None
+    if checker is not None:
+        physical_positions = torch.cat([dof_pos_buffer + bias,
+            articulation.data.joint_pos[:, joint_ids]], dim=0).cpu().numpy()
+        actual_report = checker.check(with_midpoints(physical_positions), margin=args_cli.clearance_margin)
+        actual_report["time_s"] = actual_report["frame"] / 2 / sample_rate
+        actual_report["midpoint_checks"] = True
+        metadata["actual_clearance"] = actual_report
+        print(f"[clearance] actual={actual_report}", flush=True)
+    rejected = actual_report is not None and not actual_report["passed"]
     # close the simulator
     env.close()
 
@@ -340,6 +349,24 @@ def main():
     sleep(1)  # wait a bit for everything to settle
 
     (data_dir).mkdir(parents=True, exist_ok=True)
+    output = Path(args_cli.output) if args_cli.output else data_dir / recording_name(args_cli.group, mode)
+    if not output.is_absolute():
+        output = project_root() / "data" / output
+    output.parent.mkdir(parents=True, exist_ok=True)
+    if rejected:
+        output = output.with_name(output.stem + ".rejected.pt")
+    if output.exists():
+        archived = output.with_name(output.stem + ".previous_" + datetime.now().strftime("%Y%m%d_%H%M%S_%f") + output.suffix)
+        output.rename(archived)
+        old_plan = output.with_suffix(".trajectory.json")
+        if old_plan.exists():
+            old_plan.rename(archived.with_suffix(".trajectory.json"))
+        print(f"[archive] {archived}", flush=True)
+    plan = {"joint_order": list(joint_order), "center_rad": center.tolist(),
+            "signed_amplitude_rad": amplitude.tolist(), "profile": args_cli.trajectory_profile,
+            "planned_clearance": planned_report, "actual_clearance": actual_report,
+            "limitations": "Sampled URDF visual/collision box envelopes; cross-leg/ground/leg-limits only, not continuous or whole-body certification."}
+    output.with_suffix(".trajectory.json").write_text(json.dumps(plan, indent=2))
     torch.save({
         "time": time_data.cpu(),
         "dof_pos": dof_pos_buffer.cpu(),
@@ -359,9 +386,17 @@ def main():
             "damping": damping[0].detach().float().cpu(),
             "friction": friction[0].detach().float().cpu(),
             "bias": bias[0].detach().float().cpu(),
-            "delay": float(time_lag[0, 0].float().cpu()),
+            "delay": float(time_lag[0].float().cpu()),
         },
-    }, data_dir / "chirp_data.pt")
+        "joint_names": list(joint_order),
+        "excited": [joint_order[i] for i in selected],
+        "experiment": metadata,
+    }, output)
+    print(f"[saved] {output}", flush=True)
+    if not args_cli.plot:
+        if rejected:
+            raise SystemExit("Actual motion failed clearance checks; diagnostic saved as .rejected.pt, do not fit it.")
+        return
 
     import matplotlib.pyplot as plt
 
@@ -441,6 +476,8 @@ def main():
     fig3.suptitle("S800 Chirp — Joint Velocity", fontsize=12)
     plt.tight_layout()
     plt.show()
+    if rejected:
+        raise SystemExit("Actual motion failed clearance checks; diagnostic saved as .rejected.pt, do not fit it.")
 
 if __name__ == "__main__":
     # run the main function

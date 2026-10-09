@@ -18,6 +18,7 @@ EXTENSION_TOML_DATA = toml.load(os.path.join(EXTENSION_PATH, "config", "extensio
 INSTALL_REQUIRES = [
     "psutil",
     "cmaes",
+    "trimesh",  # S800 visual/collision envelopes for trajectory clearance checks
 ]
 
 # Installation operation
