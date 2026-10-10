@@ -92,6 +92,15 @@ def main():
         data_file = project_root() / "data" / data_file
     data = torch.load(data_file, map_location="cpu", weights_only=True)
     mode = args_cli.delay_mode or data.get("experiment", {}).get("delay_mode", default_mode)
+    recorded_delay = data.get("gt", {}).get("delay")
+    delay_setting = ("recorded truth (floor_test)" if args_cli.floor_test else
+                     f"fixed {args_cli.fix_delay} steps" if args_cli.fix_delay is not None else
+                     "optimized" if args_cli.opt_delay else "frozen at initialization")
+    print(f"[data] {data_file}, samples={len(data['time'])}", flush=True)
+    print(f"[delay] mode={mode}, recorded GT={recorded_delay if recorded_delay is not None else 'unknown'} steps, fit={delay_setting}", flush=True)
+    if recorded_delay is not None and args_cli.fix_delay is not None and float(recorded_delay) != args_cli.fix_delay:
+        print(f"[WARNING] fix_delay={args_cli.fix_delay} differs from recorded GT={float(recorded_delay):g} steps. "
+              "Other parameters may compensate for the timing mismatch; this is not a matched-delay recovery experiment.", flush=True)
     configure_delay(env_cfg, mode)
     if "self_collisions" in data.get("experiment", {}):
         env_cfg.scene.robot.spawn.articulation_props.enabled_self_collisions = data["experiment"]["self_collisions"]

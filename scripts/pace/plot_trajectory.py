@@ -172,10 +172,23 @@ GT_BIAS = 0.05      # all joints
 # ⚠️ 必须与 data_collection.py 的 time_lag 一致，否则表里 Delay 那行的 Err% 是错的
 #    （静默错值，不报错）。这个常量是"手工真值表"的残留 —— 新采的数据在
 #    chirp_data.pt 里自带 "gt" 字段，以后应当优先读它。
-GT_DELAY = 3        # sim steps，@400Hz = 7.5ms（data_collection.py 的 time_lag 也是 3）
+GT_DELAY = 5        # sim steps，@400Hz 
 
 if plot_table:
     num_joints = len(joint_order)
+    # The recording snapshot is authoritative; manual constants are only a
+    # fallback for legacy runs without recorded truth (e.g. different delays).
+    recorded_gt = config.get("gt")
+    if recorded_gt is not None:
+        if list(recorded_gt["joint_order"]) != list(joint_order):
+            raise ValueError("Recorded truth joint order differs from plotting joint order")
+        GT_ARMATURE = dict(zip(joint_order, recorded_gt["armature"].tolist()))
+        GT_VISCOUS = dict(zip(joint_order, recorded_gt["damping"].tolist()))
+        GT_FRICTION = dict(zip(joint_order, recorded_gt["friction"].tolist()))
+        GT_DELAY = float(recorded_gt["delay"])
+        print(f"[ground truth] Loaded from this run's config.pt; delay={GT_DELAY:g} steps")
+    else:
+        print("[WARNING] No recorded gt; comparison uses legacy manual constants.")
 
     # Extract identified parameters from the mean vector
     id_armature = mean[0:num_joints]
@@ -222,7 +235,7 @@ if plot_table:
         # a_gt = GT_ARMATURE
         # v_gt = GT_VISCOUS
         # f_gt = GT_FRICTION
-        b_gt = GT_BIAS
+        b_gt = float(recorded_gt["bias"][i]) if recorded_gt is not None else GT_BIAS
 
         # Identified
         a_id = id_armature[i].item()

@@ -18,6 +18,29 @@ ROOT = Path(__file__).resolve().parents[2]
 
 
 class ExperimentTests(unittest.TestCase):
+    def test_plot_table_uses_snapshot_truth_instead_of_manual_constants(self):
+        import csv
+        path = ROOT / "scripts/pace/plot_trajectory.py"
+        tree = ast.parse(path.read_text())
+        block = next(n for n in tree.body if isinstance(n, ast.If)
+                     and isinstance(n.test, ast.Name) and n.test.id == "plot_table")
+        names = ["left", "right"]
+        gt = dict(joint_order=names, armature=torch.tensor([.1, .2]),
+                  damping=torch.tensor([.3, .4]), friction=torch.tensor([.5, .6]),
+                  bias=torch.tensor([.01, .02]), delay=3.)
+        with tempfile.TemporaryDirectory() as directory:
+            values = dict(plot_table=True, joint_order=names, config={"gt": gt},
+                          mean=torch.ones(9), log_dir=Path(directory), csv=csv,
+                          GT_ARMATURE={}, GT_VISCOUS={}, GT_FRICTION={}, GT_BIAS=.05, GT_DELAY=5)
+            with patch("builtins.print"):
+                exec(compile(ast.Module(body=[block], type_ignores=[]), str(path), "exec"), values)
+            with (Path(directory) / "param_comparison.csv").open() as file:
+                rows = list(csv.reader(file))
+            self.assertAlmostEqual(float(rows[1][1]), .1)
+            self.assertAlmostEqual(float(rows[1][10]), .01)
+            self.assertAlmostEqual(float(rows[2][10]), .02)
+            self.assertEqual(float(rows[-1][1]), 3.)
+
     def test_scaled_legacy_preserves_original_formula_and_unexcited_joints(self):
         from s800_motion import nominal_motion, scaled_nominal_motion
         names = ["J01_HIP_ROLL_L", "J07_HIP_ROLL_R", "J03_KNEE_PITCH_L", "J12_TORSO_YAW"]
