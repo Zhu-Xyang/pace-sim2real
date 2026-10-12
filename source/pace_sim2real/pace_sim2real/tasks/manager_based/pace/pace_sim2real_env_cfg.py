@@ -88,7 +88,7 @@ class TerminationsCfg:
 @configclass
 class CMAESOptimizerCfg:
     """CMA-ES optimizer configuration."""
-    max_iteration: int = 15000 # 从四足12dof到s800 27dof 增加迭代次数
+    max_iteration: int = 15000 # 从四足 12dof 到 s800 22dof 增加迭代次数
     epsilon: float = 1e-2
     sigma: float = 0.5
     save_interval: int = 25

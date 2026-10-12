@@ -38,20 +38,27 @@ from pathlib import Path
 import numpy as np
 
 REPO = Path(__file__).resolve().parents[1]
-URDF = REPO / "assets_robot/engineai_S800/urdf/serial_s800.urdf"
+URDF = REPO / "assets_robot/engineai_S800/urdf/serial_s800_lock_wrist_torso.urdf"
 COLLECTOR = REPO / "scripts/pace/data_collection.py"
+CFG = REPO / "source/pace_sim2real/pace_sim2real/tasks/manager_based/pace/s800_pace_env_cfg.py"
 
-JOINT_ORDER = [
-    "J00_HIP_PITCH_L", "J01_HIP_ROLL_L", "J02_HIP_YAW_L", "J03_KNEE_PITCH_L",
-    "J04_ANKLE_PITCH_L", "J05_ANKLE_ROLL_L",
-    "J06_HIP_PITCH_R", "J07_HIP_ROLL_R", "J08_HIP_YAW_R", "J09_KNEE_PITCH_R",
-    "J10_ANKLE_PITCH_R", "J11_ANKLE_ROLL_R",
-    "J12_TORSO_YAW",
-    "J13_SHOULDER_PITCH_L", "J14_SHOULDER_ROLL_L", "J15_SHOULDER_YAW_L",
-    "J16_ELBOW_PITCH_L", "J17_ELBOW_YAW_L", "J18_WRIST_PITCH_L", "J19_WRIST_ROLL_L",
-    "J27_SHOULDER_PITCH_R", "J28_SHOULDER_ROLL_R", "J29_SHOULDER_YAW_R",
-    "J30_ELBOW_PITCH_R", "J31_ELBOW_YAW_R", "J32_WRIST_PITCH_R", "J33_WRIST_ROLL_R",
-]
+
+def load_joint_order() -> list[str]:
+    """从 env cfg 源码读出 joint_order。
+
+    以前这里抄了一份 27 个名字的字面量，和 cfg 是两份会各自漂移的拷贝。
+    cfg 用 ast 能直接读（和 test_experiments.py 的 test_actual_s800_partition 同一手法），
+    这样关节表永远只有一处。
+    """
+    import ast
+
+    tree = ast.parse(CFG.read_text())
+    node = next(n for n in ast.walk(tree) if isinstance(n, ast.AnnAssign)
+                and isinstance(n.target, ast.Name) and n.target.id == "joint_order")
+    return ast.literal_eval(node.value)
+
+
+JOINT_ORDER = load_joint_order()
 
 MIRROR = np.diag([1.0, -1.0, 1.0])
 

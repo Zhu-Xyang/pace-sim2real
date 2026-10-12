@@ -134,17 +134,19 @@ logs/pace/anymal_d_sim/
 
 ---
 
-#### 3.1 参数布局（109 维）
+#### 3.1 参数布局（89 维）
 
-`4 × n_joints + 1 = 109`（S800 27 个关节），每一段内部按 env cfg 的 `joint_order` 排列：
+`4 × n_joints + 1 = 89`（S800 **22** 个关节；`J12_TORSO_YAW` 与 4 个腕关节已锁定为 fixed，
+见 `docs/s800_single_part.md` 开头的模型变更说明）。每一段内部按 env cfg 的 `joint_order` 排列，
+`n = len(joint_order)`，下标一律由 n 推出、**不要写死**：
 
 | 下标 | 参数 | 单位 | 说明 |
 |---|---|---|---|
-| `[0:27]` | armature | kg·m² | 转子惯量，等效到关节侧 |
-| `[27:54]` | viscous friction | Nm·s/rad | 粘性摩擦 |
-| `[54:81]` | coulomb friction | Nm | 库仑摩擦（PhysX 里 static = dynamic 时生效） |
-| `[81:108]` | encoder bias | rad | 编码器零位偏差 |
-| `[108]` | delay | sim steps @400 Hz | 指令延时，全局一个 |
+| `[0:n]` = `[0:22]` | armature | kg·m² | 转子惯量，等效到关节侧 |
+| `[n:2n]` = `[22:44]` | viscous friction | Nm·s/rad | 粘性摩擦 |
+| `[2n:3n]` = `[44:66]` | coulomb friction | Nm | 库仑摩擦（PhysX 里 static = dynamic 时生效） |
+| `[3n:4n]` = `[66:88]` | encoder bias | rad | 编码器零位偏差 |
+| `[4n]` = `[88]` | delay | sim steps @400 Hz | 指令延时，全局一个 |
 
 搜索区间来自 `s800_pace_env_cfg.py` 的 `bounds_params`（`__post_init__` 里按关节类型设置），
 **CMA-ES 的初始均值 = 区间中点**。⚠️ 真值必须落在区间内：越界时 CMA-ES 会贴着边界收敛
@@ -157,7 +159,7 @@ logs/pace/anymal_d_sim/
 | `--task` | `Isaac-Pace-S800-v0` | 任务名，决定用哪份 env cfg |
 | `--num_envs` | `4096` | 同时等于 CMA-ES 的种群大小 |
 | `--headless` | off | 无 GUI（服务器上必加） |
-| `--group` | `all` | 只优化某几组关节，见 3.3。可逗号组合 `legs,torso` |
+| `--group` | `all` | 只优化某几组关节，见 3.3。可逗号组合 `legs,arms` |
 | `--warm_start` | 无 | `mean_*.pt` 路径或 run 目录；冻结其余组并作为初始均值 |
 | `--opt_delay` / `--no-opt_delay` | 开 | 每轮是否把全局 delay 一起放开重优化 |
 | `--sigma` | cfg 的 `0.5` | CMA-ES 初始步长（归一化空间，盒子宽度为 2） |
@@ -184,11 +186,12 @@ L = L_腿(θ_腿) + L_腰+臂(θ_腰, θ_臂)
 旁证：26_09_30 那轮腿错 400%、臂仍准到 0.1%，且臂的残差比腿小 9 倍 —— 真耦合的话
 腿的错误会把臂的残差顶起来。
 
-但**支链内部是耦合的**：`LINK_TORSO_YAW → J13/J27`，torso 是双臂的父关节，臂对 torso
-也有反作用 → **torso 和 arms 必须同一轮优化**（`--group arms,torso`），不能先臂后腰。
+原先**腰和臂是耦合的**：`LINK_TORSO_YAW → J13/J27`，torso 是双臂的父关节，臂对 torso
+也有反作用，所以当时要求 `--group arms,torso` 同一轮优化。**2026-10-10 起 `J12_TORSO_YAW`
+已锁定为 fixed**，`arms` 变成挂在固定基座上的独立支链，不再需要和腰同时优化。
 
-**为什么要分组而不是一次搜 109 维**：各组参数的量纲差距很大 —— 腕关节的库仑摩擦占自身
-力矩预算 ~5.8%，髋只有 0.04%（差 45 倍）。一套 bounds 尺度 + 一个 σ 覆盖全部 109 维时
+**为什么要分组而不是一次搜 89 维**：各组参数的量纲差距很大 —— 末端关节的库仑摩擦占自身
+力矩预算可达 ~5.8%，髋只有 0.04%（差两个数量级）。一套 bounds 尺度 + 一个 σ 覆盖全部维度时
 必然牺牲一组：实测全场统一 bounds 那轮，轻关节准到 0.1%、髋/膝摩擦错 400%。
 
 ##### 流程 A：从零开始（不复用旧 run）
@@ -201,7 +204,7 @@ python scripts/pace/fit.py --headless --task=Isaac-Pace-S800-v0 \
 # 2) 腰+臂：--warm_start 的作用只是把腿的收敛值带进输出文件。
 #    臂/腰在 warm_start 里仍是中点，所以它们依然是从中点开始的全空间搜索，没有被热启动。
 python scripts/pace/fit.py --headless --task=Isaac-Pace-S800-v0 \
-    --group arms,torso --warm_start logs/pace/s800_sim/<上一轮目录> --no-opt_delay --epsilon 0
+    --group arms --warm_start logs/pace/s800_sim/<上一轮目录> --no-opt_delay --epsilon 0
 
 # 3) 收尾：此时各组都已收敛，全局跑一轮把 delay 定下来
 python scripts/pace/fit.py --headless --task=Isaac-Pace-S800-v0 \
@@ -218,8 +221,8 @@ python scripts/pace/fit.py --headless --task=Isaac-Pace-S800-v0 \
 
 几点注意：
 
-- **损失始终在全部 27 个关节上算**，不按组裁剪。在块对角的情形下这与按组裁剪等价，
-  留着更简单；块内存在耦合（torso↔臂）时才必须保留。冻结组的参数值原样写进 `mean_*.pt`。
+- **损失在全部 22 个关节上算**，不按组裁剪（`--group` 会把它裁到本组，见 `fit.py` 的
+  `loss_joints`）。冻结组的参数值原样写进 `mean_*.pt`。
 - `--warm_start` 有**两个作用**，用之前要分清想要哪个：① 冻结其余组的取值；② 作为本组
   CMA-ES 的初始均值。想做「从头搜」就**只**让它承担 ①（即让别的组一直是中点，见流程 A）；
   想「接着细化」就两者都要（见流程 B，记得配 `--sigma 0.1~0.15`）。
@@ -233,7 +236,7 @@ python scripts/pace/fit.py --headless --task=Isaac-Pace-S800-v0 \
 - 分组后维度降到 ~49，`--num_envs 4096` 是 84 倍冗余（损失是确定性的、没有噪声），
   降到 1024 能在同样时间里多跑 4 倍迭代。
 - 冻结值若落在当前 bounds 外会被夹到边界并打印警告（切换 `UNIFORM_GT` 时要留意）。
-- 还没做左右绑定（109→61）。S800 左右真值相同、激励按镜像设计，绑定可以零代价
+- 还没做左右绑定（89→45：11 对 L/R × 4 类 + 1 个 delay）。S800 左右真值相同、激励按镜像设计，绑定可以零代价
   砍掉 L−R 方向的噪声，属于后续可选项。
 
 #### 3.4 输出文件
@@ -241,8 +244,8 @@ python scripts/pace/fit.py --headless --task=Isaac-Pace-S800-v0 \
 ```
 logs/pace/s800_sim/<YY_MM_DD_HH-MM-SS>/
 ├── config.pt            # bounds / joint_order / 本轮拟合用的 dof_pos,des_dof_pos,time
-├── mean_<iter>.pt       # 每 save_interval(=25) 代一次，109 维物理量纲向量
-├── best_trajectory.pt   # 该代最优个体的仿真轨迹 (T × 27)
+├── mean_<iter>.pt       # 每 save_interval(=25) 代一次，89 维物理量纲向量
+├── best_trajectory.pt   # 该代最优个体的仿真轨迹 (T × 22)
 └── events.out.tfevents.*  # TensorBoard
 ```
 
@@ -262,7 +265,7 @@ TensorBoard 里按重要性看：
 
 | tag | 含义 |
 |---|---|
-| `0_Episode/score` | **主指标**：该代最优个体的 Σ(位置误差²) 均值（27 关节、全时段） |
+| `0_Episode/score` | **主指标**：该代最优个体的 Σ(位置误差²) 均值（22 关节、全时段） |
 | `6_GroupResid/best_<组>` | 逐组 RMS 位置残差 [rad]，分组拟合的验收指标 |
 | `0_Episode/diff_score` | 种群离散度 / 最优。持续在 ~10 以上说明还没收敛 |
 | `5_BandLoss/share_*Hz` | 残差落在哪个频段：armature 效应 ∝ω² 住高频，摩擦与 ω 无关住低频 |
@@ -277,8 +280,11 @@ TensorBoard 里按重要性看：
 | `26_09_29_12-41-22` mean_1975 | 0.00249 | 0.00262 | 0.00262 |
 | `26_09_30_15-34-31` mean_6450（uniform GT） | 0.00852 | 0.00083 | 0.00094 |
 
-判断标准：`--group legs` 跑完后 `6_GroupResid/best_legs` 应明显低于基线，且 torso/arms
-不应变差。**如果没降就说明分组没用，不要继续跑 arms/torso。**
+判断标准：`--group legs` 跑完后 `6_GroupResid/best_legs` 应明显低于基线，且 arms
+不应变差。**如果没降就说明分组没用，不要继续跑 arms。**
+
+> 上表是 27 自由度时期的基线，仅供参考；当前资产是 22 自由度，数值不可直接对照。
+> 当前的分组流程见 `docs/s800_single_part.md`。
 
 ⚠️ 一个口径陷阱：`data_dir` 指向的 `chirp_data.pt` 一旦被覆盖，之前的 run 就没法复现了；
 `UNIFORM_GT`（cfg）必须和 `data_collection.py --uniform_gt` 在采集时保持一致，否则真值

@@ -84,7 +84,9 @@ class CMAESOptimizer:
         self.opt_delay = opt_delay
 
         # 冻结维的参考值（归一化空间 [0,1] 之外无意义，一律夹到 [-1,1]）。
-        # warm_start 给的是物理量纲的完整 109 维向量（就是 save_checkpoint 写的 mean_*.pt）。
+        # warm_start 给的是物理量纲的完整向量（4n+1 维，当前 S800 是 89 维，
+        # 就是 save_checkpoint 写的 mean_*.pt）。长度必须与 bounds 一致，
+        # 否则下面那句会拦下来 —— 换关节表后旧的 mean_*.pt 就是这样被拒的。
         if warm_start is not None:
             _ws = torch.as_tensor(warm_start, device=device).float().flatten()
             if _ws.numel() != bounds.shape[0]:
@@ -115,7 +117,9 @@ class CMAESOptimizer:
         _frozen_n = bounds.shape[0] - len(_act)
         print(f"[group] active={len(_act)} 维 / {len(_act_joints)} 关节"
               f"（{'含' if opt_delay else '不含'} delay），冻结 {_frozen_n} 维")
-        _opt_names = ([k for k, v in self.groups.items() if set(v) <= set(_act_joints)]
+        # 空组必须排除：set() <= 任何集合恒为真，否则锁掉 J12_TORSO_YAW 之后
+        # torso 会一直被列成"优化组"，看着像参与了优化，实际一维都没占。
+        _opt_names = ([k for k, v in self.groups.items() if v and set(v) <= set(_act_joints)]
                       if active_groups is not None else ["全部"])
         print(f"[group] 初始 mean 取自 {'warm_start' if warm_start is not None else 'bounds 中点'}；"
               f"优化组={_opt_names}")

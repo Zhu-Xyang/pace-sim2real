@@ -128,17 +128,19 @@ if plot_trajectory:
 # Parameter comparison table: identified vs. ground-truth (preset) values
 # ----------------------------------------------------------------------------
 # Ground-truth values used in data_collection.py to generate the "real" data.
-# These must be kept in sync with scripts/pace/data_collection.py.
+# ⚠️ 这是**兜底**表：只要 run 的 config.pt 里带了 "gt"（新 run 都带），下面
+#    `if plot_table:` 里会整表覆盖掉它 —— 权威来源是数据随行的 gt，不是这里。
+#    只对没有 gt 的旧记录生效。J12_TORSO_YAW 与 4 个 WRIST 已锁定在
+#    serial_s800_lock_wrist_torso.urdf 里、不再是可辨识关节，故不再列出。
 GT_ARMATURE = {
     "J00_HIP_PITCH_L": 0.24, "J01_HIP_ROLL_L": 0.14, "J02_HIP_YAW_L": 0.05,
     "J03_KNEE_PITCH_L": 0.24, "J04_ANKLE_PITCH_L": 0.05, "J05_ANKLE_ROLL_L": 0.05,
     "J06_HIP_PITCH_R": 0.24, "J07_HIP_ROLL_R": 0.14, "J08_HIP_YAW_R": 0.05,
     "J09_KNEE_PITCH_R": 0.24, "J10_ANKLE_PITCH_R": 0.05, "J11_ANKLE_ROLL_R": 0.05,
-    "J12_TORSO_YAW": 0.05,
     "J13_SHOULDER_PITCH_L": 0.05, "J14_SHOULDER_ROLL_L": 0.05, "J15_SHOULDER_YAW_L": 0.05,
-    "J16_ELBOW_PITCH_L": 0.05, "J17_ELBOW_YAW_L": 0.008, "J18_WRIST_PITCH_L": 0.008, "J19_WRIST_ROLL_L": 0.008,
+    "J16_ELBOW_PITCH_L": 0.05, "J17_ELBOW_YAW_L": 0.008,
     "J27_SHOULDER_PITCH_R": 0.05, "J28_SHOULDER_ROLL_R": 0.05, "J29_SHOULDER_YAW_R": 0.05,
-    "J30_ELBOW_PITCH_R": 0.05, "J31_ELBOW_YAW_R": 0.008, "J32_WRIST_PITCH_R": 0.008, "J33_WRIST_ROLL_R": 0.008,
+    "J30_ELBOW_PITCH_R": 0.05, "J31_ELBOW_YAW_R": 0.008,
 }
 
 GT_VISCOUS = {
@@ -146,11 +148,10 @@ GT_VISCOUS = {
     "J03_KNEE_PITCH_L": 1.6, "J04_ANKLE_PITCH_L": 0.5, "J05_ANKLE_ROLL_L": 0.5,
     "J06_HIP_PITCH_R": 1.6, "J07_HIP_ROLL_R": 1.6, "J08_HIP_YAW_R": 1.0,
     "J09_KNEE_PITCH_R": 1.6, "J10_ANKLE_PITCH_R": 0.5, "J11_ANKLE_ROLL_R": 0.5,
-    "J12_TORSO_YAW": 1.0,
     "J13_SHOULDER_PITCH_L": 0.5, "J14_SHOULDER_ROLL_L": 0.5, "J15_SHOULDER_YAW_L": 0.5,
-    "J16_ELBOW_PITCH_L": 0.5, "J17_ELBOW_YAW_L": 0.1, "J18_WRIST_PITCH_L": 0.1, "J19_WRIST_ROLL_L": 0.1,
+    "J16_ELBOW_PITCH_L": 0.5, "J17_ELBOW_YAW_L": 0.1,
     "J27_SHOULDER_PITCH_R": 0.5, "J28_SHOULDER_ROLL_R": 0.5, "J29_SHOULDER_YAW_R": 0.5,
-    "J30_ELBOW_PITCH_R": 0.5, "J31_ELBOW_YAW_R": 0.1, "J32_WRIST_PITCH_R": 0.1, "J33_WRIST_ROLL_R": 0.1,
+    "J30_ELBOW_PITCH_R": 0.5, "J31_ELBOW_YAW_R": 0.1,
 }
 
 GT_FRICTION = {
@@ -158,21 +159,20 @@ GT_FRICTION = {
     "J03_KNEE_PITCH_L": 1.0, "J04_ANKLE_PITCH_L": 0.3, "J05_ANKLE_ROLL_L": 0.3,
     "J06_HIP_PITCH_R": 1.0, "J07_HIP_ROLL_R": 1.0, "J08_HIP_YAW_R": 0.3,
     "J09_KNEE_PITCH_R": 1.0, "J10_ANKLE_PITCH_R": 0.3, "J11_ANKLE_ROLL_R": 0.3,
-    "J12_TORSO_YAW": 0.3,
     "J13_SHOULDER_PITCH_L": 0.3, "J14_SHOULDER_ROLL_L": 0.3, "J15_SHOULDER_YAW_L": 0.3,
-    "J16_ELBOW_PITCH_L": 0.3, "J17_ELBOW_YAW_L": 0.05, "J18_WRIST_PITCH_L": 0.05, "J19_WRIST_ROLL_L": 0.05,
+    "J16_ELBOW_PITCH_L": 0.3, "J17_ELBOW_YAW_L": 0.05,
     "J27_SHOULDER_PITCH_R": 0.3, "J28_SHOULDER_ROLL_R": 0.3, "J29_SHOULDER_YAW_R": 0.3,
-    "J30_ELBOW_PITCH_R": 0.3, "J31_ELBOW_YAW_R": 0.05, "J32_WRIST_PITCH_R": 0.05, "J33_WRIST_ROLL_R": 0.05,
+    "J30_ELBOW_PITCH_R": 0.3, "J31_ELBOW_YAW_R": 0.05,
 }
 
 # GT_ARMATURE = 0.05
 # GT_VISCOUS = 0.5    # all joints
 # GT_FRICTION = 0.05   # all joints
 GT_BIAS = 0.05      # all joints
-# ⚠️ 必须与 data_collection.py 的 time_lag 一致，否则表里 Delay 那行的 Err% 是错的
-#    （静默错值，不报错）。这个常量是"手工真值表"的残留 —— 新采的数据在
-#    chirp_data.pt 里自带 "gt" 字段，以后应当优先读它。
-GT_DELAY = 5        # sim steps，@400Hz 
+# ⚠️ 仅作兜底；有 gt 的记录会用 gt['delay']（见下面 if plot_table 块）。
+#    这个常量是"手工真值表"的残留，与当前 data_collection.py 默认的 3 步不一致，
+#    只对没有 gt 的旧记录生效。
+GT_DELAY = 5        # sim steps，@400Hz
 
 if plot_table:
     num_joints = len(joint_order)

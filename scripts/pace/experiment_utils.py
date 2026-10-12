@@ -27,6 +27,12 @@ def select_groups(group, joint_order):
     if not names or set(names) - groups.keys():
         raise ValueError("group must be all, legs, torso, arms, or comma-separated groups")
     names = [g for g in groups if g in names]
+    # 空组必须显式报错：`--group legs,torso` 若不拦，torso 会被静默丢掉，
+    # 跑出来的损失看起来正常、实际少了上半身（J12_TORSO_YAW 锁定后 torso 就是空组）。
+    empty = [g for g in names if not groups[g]]
+    if empty:
+        raise ValueError(f"这些组在当前关节表里没有关节: {empty}；"
+                         f"可用组: {[g for g in groups if groups[g]]}")
     indices = sorted(i for g in names for i in groups[g])
     if not indices:
         raise ValueError("Selected group has no joints")

@@ -76,7 +76,7 @@ class ExperimentTests(unittest.TestCase):
         node = next(n for n in ast.walk(tree) if isinstance(n, ast.AnnAssign)
                     and isinstance(n.target, ast.Name) and n.target.id == "joint_order")
         names = ast.literal_eval(node.value)
-        checker = LegClearance(ROOT / "assets_robot/engineai_S800/urdf/serial_s800.urdf", names)
+        checker = LegClearance(ROOT / "assets_robot/engineai_S800/urdf/serial_s800_lock_wrist_torso.urdf", names)
         center, amplitude = nominal_motion(names)
         self.assertAlmostEqual(float(center[1]), .045)
         self.assertAlmostEqual(float(center[3]), .523)
@@ -157,10 +157,16 @@ class ExperimentTests(unittest.TestCase):
                     and isinstance(n.target, ast.Name) and n.target.id == "joint_order")
         names = ast.literal_eval(node.value)
         groups = build_joint_groups(names)
-        self.assertEqual([len(groups[g]) for g in ("legs", "torso", "arms")], [12, 1, 14])
-        self.assertEqual(sorted(j for values in groups.values() for j in values), list(range(27)))
+        self.assertEqual([len(groups[g]) for g in ("legs", "torso", "arms")], [12, 0, 10])
+        self.assertEqual(sorted(j for values in groups.values() for j in values), list(range(22)))
         with self.assertRaises(ValueError):
             select_groups("all,legs", names)
+        # torso 在锁定 J12_TORSO_YAW 之后是空组：单独选它、或混在逗号列表里，
+        # 都必须显式报错而不是静默跑一个不含上半身的实验
+        with self.assertRaises(ValueError):
+            select_groups("torso", names)
+        with self.assertRaises(ValueError):
+            select_groups("legs,torso", names)
         self.assertNotEqual(recording_name("legs", "command"), recording_name("arms", "command"))
 
     def test_chirp_holds_other_joints_and_has_exact_timing(self):

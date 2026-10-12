@@ -7,6 +7,8 @@
 """Launch Isaac Sim Simulator first."""
 
 import argparse
+import os
+import sys
 from pathlib import Path
 from experiment_utils import (build_joint_groups, select_groups, recording_name, configure_delay,
                               actuator_metadata, validate_recording, freeze_unfitted_truth)
@@ -98,9 +100,23 @@ def main():
                      "optimized" if args_cli.opt_delay else "frozen at initialization")
     print(f"[data] {data_file}, samples={len(data['time'])}", flush=True)
     print(f"[delay] mode={mode}, recorded GT={recorded_delay if recorded_delay is not None else 'unknown'} steps, fit={delay_setting}", flush=True)
-    if recorded_delay is not None and args_cli.fix_delay is not None and float(recorded_delay) != args_cli.fix_delay:
-        print(f"[WARNING] fix_delay={args_cli.fix_delay} differs from recorded GT={float(recorded_delay):g} steps. "
-              "Other parameters may compensate for the timing mismatch; this is not a matched-delay recovery experiment.", flush=True)
+    # ── 延时口径护栏 ────────────────────────────────────────────────────────
+    # 这里曾经只打一行 WARNING。26_10_09 那次 arms 拟合就是带着 fix_delay=5 去追
+    # gt.delay=3 的数据，跑了 7 小时：14 个手臂关节全部停在 2~4% 残差，armature
+    # 错到 90% 且顶在下界——优化器在用连续参数补偿那 5 ms 的固定相位差。
+    # 这种错误不该只是"提醒"，直接拦下来。
+    if recorded_delay is not None and args_cli.fix_delay is not None \
+            and float(recorded_delay) != args_cli.fix_delay:
+        print(
+            f"[delay] --fix_delay {args_cli.fix_delay} 与数据里的注入真值 {float(recorded_delay):g} 步不一致。\n"
+            f"        数据 {data_file}\n"
+            f"        延时错 N 步会让每个关节都差一个 N·dt 的相位，优化器会用 armature/摩擦\n"
+            f"        去补偿它，最后得到一组轨迹看着还行、参数全错的解。\n"
+            f"        改成 --fix_delay {float(recorded_delay):g}，或干脆去掉该项让 delay 参与搜索。",
+            file=sys.stderr, flush=True)
+        # ⚠️ 不能用 raise SystemExit：Isaac Sim 的退出清理会把进程退出码压回 0
+        #    （实测），run_s800_groups.py 靠 returncode 判断失败，会被骗过去。
+        os._exit(1)
     configure_delay(env_cfg, mode)
     if "self_collisions" in data.get("experiment", {}):
         env_cfg.scene.robot.spawn.articulation_props.enabled_self_collisions = data["experiment"]["self_collisions"]
@@ -157,10 +173,14 @@ def main():
 
     # ── 分组优化：解析要优化的组 + 载入 warm start ────────────────────────
     groups = build_joint_groups(joint_order)
-    print("[group] 分组: " + ", ".join(f"{g}={len(v)}关节" for g, v in groups.items()))
+    print("[group] 分组: " + ", ".join(f"{g}={len(v)}关节" for g, v in groups.items() if v)
+          + (f"（空组: {[g for g, v in groups.items() if not v]}）"
+             if any(not v for v in groups.values()) else ""))
 
     if active_groups and not args_cli.freeze_unfitted_gt and not args_cli.floor_test:
-        print("[group] 未拟合参数来自 warm_start 或 bounds 中点；torso/arms 的动力学耦合仍存在。")
+        # J12_TORSO_YAW 锁定后 arms 已是挂在固定基座上的独立支链，不再被 torso 拖动；
+        # 但腿仍通过基座与全身质量耦合，未拟合组的参数错了照样会传到本组。
+        print("[group] 未拟合参数来自 warm_start 或 bounds 中点；腿与上半身仍通过基座耦合。")
 
     warm_start = None
     if args_cli.warm_start:
@@ -298,7 +318,11 @@ def main():
             print("      · 初始状态或时间对齐差一步（des_dof_pos 与 dof_pos 错位）")
             print("      · 代码里的真值常量与注入值不一致（本检查读的是数据里的 gt，不是常量）")
             print("      · 接触/限位事件，或动力学对参数微扰的敏感性")
-            raise SystemExit(1)
+            # 同上面的理由：raise SystemExit 的退出码会被 Isaac 的清理压回 0，
+            # 直接调用 fit.py --floor_test 的人会以为通过了。
+            sys.stdout.flush()
+            sys.stderr.flush()
+            os._exit(1)
         print("=" * 72)
 
 if __name__ == "__main__":

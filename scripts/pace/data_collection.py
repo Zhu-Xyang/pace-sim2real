@@ -48,11 +48,11 @@ parser.add_argument("--seed", type=int, default=0, help="仿真环境随机种�
 # ANYmal 的 round-trip 能到 <1%，一个尚未排除的原因是它的 GT 全场统一
 # （armature 0.1×12 / damping 4.5×12 / friction 0.05×12），且四条腿结构完全相同
 # → 损失对腿间参数置换有精确对称性 → 实际有效维度远小于 49。
-# S800 现在是 109 个逐关节不同的值，没有这个对称性。
+# S800 现在是逐关节不同的值，没有这个对称性。
 # ⚠️ 打开时必须同时把 s800_pace_env_cfg.py 的 UNIFORM_GT 设为 True，否则 GT 会
 #    落在 bounds 外 —— armature 尤其：现有 14 组分段区间的交集是空集
 #    （max(lo)=0.05 > min(hi)=0.02），统一值无处可放。
-# 注意：S800 的 27 个关节动力学各不相同（不像 ANYmal 四条腿相同），所以置换对称
+# 注意：S800 的各关节动力学各不相同（不像 ANYmal 四条腿相同），所以置换对称
 #       性比 ANYmal 弱 —— 这个对照能排除维度，但不等价于复刻 ANYmal 的实验。
 parser.add_argument("--uniform_gt", action=argparse.BooleanOptionalAction, default=False,
                     help="对照组：armature/damping/friction 的 GT 改为全场统一值。必须与 cfg 的 UNIFORM_GT 同步。")
@@ -77,7 +77,7 @@ import isaaclab_tasks  # noqa: F401
 from isaaclab_tasks.utils import parse_env_cfg
 
 import pace_sim2real.tasks  # noqa: F401
-from pace_sim2real.utils import project_root
+from pace_sim2real.utils import project_root, joint_type
 
 def main():
     # parse configuration
@@ -123,44 +123,57 @@ def main():
     # 这一组值是「注入仿真的已知真值」，用来验证 fit 能否把它恢复出来。
     # 不追求物理正确，但要求：
     #   1) 分组内 uniform、组间拉开 → 既能被辨识，又能暴露关节间串扰/错配
-    #      （若 27 个关节全设同一个值，串扰发生了也看不出来）
+    #      （若所有关节全设同一个值，串扰发生了也看不出来）
     #   2) 量级随关节尺寸缩放 → 否则小关节会被灌进远大于自身的虚构惯量
     #   3) 必须落在 s800_pace_env_cfg.py 的 armature_bounds / damping_bounds 内
     #
-    # 4 组: 0.24(大关节) / 0.14(髋侧摆) / 0.05(中小关节) / 0.008(末端)
-    armature = torch.tensor([
-        0.24, 0.14, 0.05, 0.24, 0.05, 0.05,  # 左腿: HIP_PITCH, HIP_ROLL, HIP_YAW, KNEE, ANKLE_P, ANKLE_R
-        0.24, 0.14, 0.05, 0.24, 0.05, 0.05,  # 右腿
-        0.05,                                 # 腰: TORSO_YAW
-        0.05, 0.05, 0.05, 0.05, 0.008, 0.008, 0.008,  # 左臂: SHOULDER_P/R/Y, ELBOW_P, ELBOW_Y, WRIST_P/R
-        0.05, 0.05, 0.05, 0.05, 0.008, 0.008, 0.008,  # 右臂
-    ], device=env.unwrapped.device).unsqueeze(0)
+    # ⚠️ 这三张表按「关节类型」写（key 好 grep），再由 cfg 的 joint_order 展开成
+    #    逐关节张量。**不要再改回按位置手写的 27/22 项列表** —— 位置索引会随关节表
+    #    增删平移，错了不报错，只是静默把参数灌到别的关节上。
+    # 4 组 armature: 0.24(大关节) / 0.14(髋侧摆) / 0.05(中小关节) / 0.008(末端)
+    GT_ARMATURE_BY_TYPE = {
+        "HIP_PITCH": 0.36, "HIP_ROLL": 0.14, "HIP_YAW": 0.05, "KNEE_PITCH": 0.24,
+        "ANKLE_PITCH": 0.05, "ANKLE_ROLL": 0.05,
+        "SHOULDER_PITCH": 0.05, "SHOULDER_ROLL": 0.05, "SHOULDER_YAW": 0.05,
+        "ELBOW_PITCH": 0.05, "ELBOW_YAW": 0.008,
+    }
 
     # viscous friction (d in PACE Eq.6) — per motor type, must match s800_pace_env_cfg.py
-    #   7520-22 (HIP_PITCH/ROLL/KNEE): 1.6,  7520-14 (HIP_YAW/TORSO): 1.0,
-    #   5020 (ANKLE/SHOULDER/ELBOW_PITCH): 0.5,  4010 (ELBOW_YAW/WRIST): 0.1
-    damping = torch.tensor([
-        1.6, 1.6, 1.0, 1.6, 0.5, 0.5,  # 左腿: HIP_PITCH, HIP_ROLL, HIP_YAW, KNEE, ANKLE_P, ANKLE_R
-        1.6, 1.6, 1.0, 1.6, 0.5, 0.5,  # 右腿
-        1.0,                             # 腰: TORSO_YAW
-        0.5, 0.5, 0.5, 0.5, 0.1, 0.1, 0.1,  # 左臂: SHOULDER_P/R/Y, ELBOW_P, ELBOW_Y, WRIST_P/R
-        0.5, 0.5, 0.5, 0.5, 0.1, 0.1, 0.1,  # 右臂
-    ], device=env.unwrapped.device).unsqueeze(0)
+    #   7520-22 (HIP_PITCH/ROLL/KNEE): 1.6,  7520-14 (HIP_YAW): 1.0,
+    #   5020 (ANKLE/SHOULDER/ELBOW_PITCH): 0.5,  4010 (ELBOW_YAW): 0.1
+    GT_DAMPING_BY_TYPE = {
+        "HIP_PITCH": 1.6, "HIP_ROLL": 1.6, "HIP_YAW": 1.0, "KNEE_PITCH": 1.6,
+        "ANKLE_PITCH": 0.5, "ANKLE_ROLL": 0.5,
+        "SHOULDER_PITCH": 0.5, "SHOULDER_ROLL": 0.5, "SHOULDER_YAW": 0.5,
+        "ELBOW_PITCH": 0.5, "ELBOW_YAW": 0.1,
+    }
 
     # coulomb friction — 必须按关节缩放，不能用全场统一值。
-    # 教训：曾用 [1.5]*27，结果手腕(最大PD力矩 12.5*0.05=0.625Nm)和肘偏航
-    # (10.04*0.15=1.506Nm) 被 1.5Nm 的静摩擦完全锁死，前 3 秒位置几乎不变(变化量 1e-5 rad)。
-    # 摩擦须明显小于该关节能产生的最大 PD 力矩，否则关节根本不动、参数不可辨识。
+    # 教训：曾用全场 1.5，结果手腕和肘偏航被 1.5Nm 的静摩擦完全锁死，
+    # 前 3 秒位置几乎不变(变化量 1e-5 rad)。摩擦须明显小于该关节能产生的最大
+    # PD 力矩，否则关节根本不动、参数不可辨识。
     #   大关节(HIP_PITCH/ROLL/KNEE) PD力矩 ~150-320Nm → 1.0
     #   中小关节                       PD力矩  4-70Nm   → 0.3
-    #   末端(ELBOW_YAW/WRIST)          PD力矩 0.6-1.5Nm → 0.05
-    friction = torch.tensor([
-        1.0, 1.0, 0.3, 1.0, 0.3, 0.3,  # 左腿: HIP_PITCH, HIP_ROLL, HIP_YAW, KNEE, ANKLE_P, ANKLE_R
-        1.0, 1.0, 0.3, 1.0, 0.3, 0.3,  # 右腿
-        0.3,                                 # 腰: TORSO_YAW
-        0.3, 0.3, 0.3, 0.3, 0.05, 0.05, 0.05,  # 左臂
-        0.3, 0.3, 0.3, 0.3, 0.05, 0.05, 0.05,  # 右臂
-    ], device=env.unwrapped.device).unsqueeze(0)
+    #   末端(ELBOW_YAW)                PD力矩  0.6-1.5Nm → 0.05
+    GT_FRICTION_BY_TYPE = {
+        "HIP_PITCH": 2.0, "HIP_ROLL": 1.0, "HIP_YAW": 0.3, "KNEE_PITCH": 1.0,
+        "ANKLE_PITCH": 0.3, "ANKLE_ROLL": 0.3,
+        "SHOULDER_PITCH": 0.3, "SHOULDER_ROLL": 0.3, "SHOULDER_YAW": 0.3,
+        "ELBOW_PITCH": 0.3, "ELBOW_YAW": 0.05,
+    }
+    GT_BIAS = 0.05  # 全场统一 [rad]
+
+    def by_joint_order(table):
+        """把「类型 → 值」展开成按 joint_order 排列的 (1, n) 张量。"""
+        missing = [n for n in joint_order if joint_type(n) not in table]
+        if missing:
+            raise ValueError(f"GT 表缺少这些关节类型的取值: {sorted({joint_type(n) for n in missing})}")
+        return torch.tensor([table[joint_type(n)] for n in joint_order],
+                            device=env.unwrapped.device).unsqueeze(0)
+
+    armature = by_joint_order(GT_ARMATURE_BY_TYPE)
+    damping = by_joint_order(GT_DAMPING_BY_TYPE)
+    friction = by_joint_order(GT_FRICTION_BY_TYPE)
 
     # ── 对照组覆盖：把上面三组分段 GT 压成全场统一值 ─────────────────────
     # 用 fill_ 覆盖而不是重建，这样上面那套分组值仍然留在代码里作参考，
@@ -170,10 +183,10 @@ def main():
         damping.fill_(args_cli.uniform_damping)
         friction.fill_(args_cli.uniform_friction)
         print(f"[uniform_gt] 对照组已启用: armature={args_cli.uniform_armature} "
-              f"damping={args_cli.uniform_damping} friction={args_cli.uniform_friction}  (全场 27 关节)")
+              f"damping={args_cli.uniform_damping} friction={args_cli.uniform_friction}  (全场 {len(joint_order)} 关节)")
         print("[uniform_gt] ⚠️ 确认 s800_pace_env_cfg.py 的 UNIFORM_GT 已设为 True，否则真值落在 bounds 外。")
 
-    bias = torch.tensor([0.05] * 27, device=env.unwrapped.device).unsqueeze(0)
+    bias = torch.full((1, len(joint_order)), GT_BIAS, device=env.unwrapped.device)
 
     time_lag = torch.tensor([args_cli.delay_steps], dtype=torch.int, device=env.unwrapped.device)
     _, selected = select_groups(args_cli.group, joint_order)
@@ -227,21 +240,21 @@ def main():
     # 又在辨识里贡献无效样本；快关节则需要更高频率才能激励出 armature。
     #
     # 取值 ≈ 1.5 × ω_n（当前 I_total 校正增益下的实测值）:
-    #   慢组 ω_n ≈ 2.0-2.4 Hz (HIP_PITCH/ROLL, KNEE, ANKLE_PITCH, TORSO,
-    #                            SHOULDER_P/R, ELBOW_PITCH, WRIST_PITCH) → f1 = 3.0 Hz
+    #   慢组 ω_n ≈ 2.0-2.4 Hz (HIP_PITCH/ROLL, KNEE, ANKLE_PITCH,
+    #                            SHOULDER_P/R, ELBOW_PITCH)   → f1 = 3.0 Hz
     #   快组 ω_n ≈ 4.6-5.0 Hz (HIP_YAW, ANKLE_ROLL, SHOULDER_YAW,
-    #                            ELBOW_YAW, WRIST_ROLL)                 → f1 = 6.0 Hz
+    #                            ELBOW_YAW)                   → f1 = 6.0 Hz
     #
     # 附带好处：各关节相位不再相同（phase 含 (f1_j - f0) 项），激励自动去相关，
     # 回归矩阵条件数比全场同相位好很多。
-    # 顺序 = joint_order（"J00_HIP_PITCH_L" ... "J33_WRIST_ROLL_R"）
-    f1_per_joint = torch.tensor([
-        3.0, 3.0, 6.0, 3.0, 3.0, 6.0,      # 左腿: HIP_P, HIP_R, HIP_Y, KNEE, ANK_P, ANK_R
-        3.0, 3.0, 6.0, 3.0, 3.0, 6.0,      # 右腿
-        3.0,                                # 腰
-        3.0, 3.0, 6.0, 3.0, 6.0, 3.0, 6.0, # 左臂: SH_P, SH_R, SH_Y, ELB_P, ELB_Y, WR_P, WR_R
-        3.0, 3.0, 6.0, 3.0, 6.0, 3.0, 6.0, # 右臂
-    ], device=env.unwrapped.device)
+    # 同样按关节类型写（3.0 = 慢组 / 6.0 = 快组），再由 joint_order 展开
+    F1_BY_TYPE = {
+        "HIP_PITCH": 3.0, "HIP_ROLL": 3.0, "HIP_YAW": 6.0, "KNEE_PITCH": 3.0,
+        "ANKLE_PITCH": 3.0, "ANKLE_ROLL": 6.0,
+        "SHOULDER_PITCH": 3.0, "SHOULDER_ROLL": 3.0, "SHOULDER_YAW": 6.0,
+        "ELBOW_PITCH": 3.0, "ELBOW_YAW": 6.0,
+    }
+    f1_per_joint = by_joint_order(F1_BY_TYPE)
 
     if not args_cli.grouped_sweep:
         f1_per_joint[:] = f1   # 关闭分组时退回全场统一 f1
@@ -261,7 +274,7 @@ def main():
     checker = None
     planned_report = None
     if args_cli.trajectory_profile == "clearance":
-        checker = LegClearance(project_root() / "assets_robot/engineai_S800/urdf/serial_s800.urdf",
+        checker = LegClearance(project_root() / "assets_robot/engineai_S800/urdf/serial_s800_lock_wrist_torso.urdf",
                                joint_order, base_height=env_cfg.scene.robot.init_state.pos[2])
     if args_cli.trajectory_plan:
         plan = json.loads(args_cli.trajectory_plan.read_text())

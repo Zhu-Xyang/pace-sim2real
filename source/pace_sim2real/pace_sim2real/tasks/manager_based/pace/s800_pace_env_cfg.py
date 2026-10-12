@@ -20,7 +20,7 @@ import isaaclab.sim as sim_utils
 # ANYmal 的 round-trip 能到 <1%，一个尚未排除的原因是它的 GT 全场统一
 # （armature 0.1×12 / damping 4.5×12 / friction 0.05×12），且四条腿结构完全相同
 # → 损失对腿间参数置换有精确对称性 → 实际有效维度远小于 49。
-# S800 是 109 个逐关节不同的值，没有这个对称性。
+# S800 是逐关节不同的值，没有这个对称性。
 #
 # 打开后 armature/damping/friction 三段的 bounds 全部改为下面这组统一区间。
 # ⚠️ 必须与 data_collection.py 的 --uniform_gt 同时开/关。armature 尤其致命：
@@ -44,18 +44,21 @@ S800_ACTUATOR_CFG = PaceDCMotorCfg(
     # velocity_limit=20.0, # 电机最大速度 保守估计
     # stiffness={".*": 100.0},  # P gain in Nm/rad 
     # damping={".*": 2.0},  # D gain in Nm s/rad
+    # ⚠️ 这里的每个 key 都必须至少匹配到一个关节：IsaacLab 的
+    #    resolve_matching_names_values 默认 strict=True，匹配不到就抛
+    #    "Not all regular expressions are matched!"，环境连创建都过不去。
+    #    TORSO / WRIST 的条目已随 J12/J18/J19/J32/J33 锁定在
+    #    serial_s800_lock_wrist_torso.urdf 里而去掉（见 docs/s800_single_part.md §8）。
     effort_limit={
         ".*HIP_PITCH.*": 415.0, ".*HIP_ROLL.*": 370.0, ".*HIP_YAW.*": 222.0,
-        ".*KNEE_PITCH.*": 415.0, ".*ANKLE.*": 160.0, ".*TORSO.*": 222.0,
+        ".*KNEE_PITCH.*": 415.0, ".*ANKLE.*": 160.0,
         ".*SHOULDER.*": 160.0, ".*ELBOW_PITCH.*": 160.0, ".*ELBOW_YAW.*": 52.0,
-        ".*WRIST.*": 5.0,
     },
 
     velocity_limit={
         ".*HIP_PITCH.*": 25.96, ".*HIP_ROLL.*": 25.31, ".*HIP_YAW.*": 23.19,
-        ".*KNEE_PITCH.*": 25.96, ".*ANKLE.*": 33.51, ".*TORSO.*": 23.19,
+        ".*KNEE_PITCH.*": 25.96, ".*ANKLE.*": 33.51,
         ".*SHOULDER.*": 33.51, ".*ELBOW_PITCH.*": 33.51, ".*ELBOW_YAW.*": 35.2,
-        ".*WRIST.*": 150.0,
     },
 
     # ── 方案 C（含延时稳定性修正）────────────────────────────────────────────
@@ -73,19 +76,10 @@ S800_ACTUATOR_CFG = PaceDCMotorCfg(
     #    注：这两条约束同向 —— 降 kp 同时把极点拉回 chirp 带内。
     stiffness={
         ".*HIP_PITCH.*": 240.0, ".*HIP_ROLL.*": 200.0, ".*HIP_YAW.*": 35.11,
-        ".*KNEE_PITCH.*": 240.0, ".*ANKLE_PITCH.*": 90.0, ".*ANKLE_ROLL.*": 17.16, ".*TORSO.*": 113.0,
+        ".*KNEE_PITCH.*": 240.0, ".*ANKLE_PITCH.*": 90.0, ".*ANKLE_ROLL.*": 17.16,
         ".*SHOULDER_PITCH.*": 90.0, ".*SHOULDER_ROLL.*": 90.0, ".*SHOULDER_YAW.*": 17.89,
         ".*ELBOW_PITCH.*": 90.0, ".*ELBOW_YAW.*": 3.99,
-        ".*WRIST_PITCH.*": 12.5, ".*WRIST_ROLL.*": 5.17,
     },
-
-    # stiffness={
-    #     ".*HIP_PITCH.*": 240.00, ".*HIP_ROLL.*": 200.00, ".*HIP_YAW.*": 80.0,
-    #     ".*KNEE_PITCH.*": 240.0, ".*ANKLE_PITCH.*": 50.0, ".*ANKLE_ROLL.*": 50.0, ".*TORSO.*": 80.0,
-    #     ".*SHOULDER_PITCH.*": 60.0, ".*SHOULDER_ROLL.*": 60.0, ".*SHOULDER_YAW.*": 60.0,
-    #     ".*ELBOW_PITCH.*": 60.0, ".*ELBOW_YAW.*": 10.0,
-    #     ".*WRIST.*": 8.0,
-    # },
 
     # kd = 2ζ·sqrt(kp·I_total) − d，取 ζ = 0.40，kp 用上面调整后的值。
     # 注：上一版曾据「ω_cl 只由 kp 决定、ζ 主要由 kd 决定」把两者独立设定 —— 那个说法
@@ -116,19 +110,10 @@ S800_ACTUATOR_CFG = PaceDCMotorCfg(
     #      （误差 ∝ ω²，把踝压到 2 Hz 能把误差降 4 倍），代价是它们的极点出带。
     damping={
         ".*HIP_PITCH.*": 22.8458, ".*HIP_ROLL.*": 22.565, ".*HIP_YAW.*": 0.3885,
-        ".*KNEE_PITCH.*": 16.9833, ".*ANKLE_PITCH.*": 5.0268, ".*ANKLE_ROLL.*": 0.175, ".*TORSO.*": 7.744,
+        ".*KNEE_PITCH.*": 16.9833, ".*ANKLE_PITCH.*": 5.0268, ".*ANKLE_ROLL.*": 0.175,
         ".*SHOULDER_PITCH.*": 4.3986, ".*SHOULDER_ROLL.*": 5.943, ".*SHOULDER_YAW.*": 0.2107,
         ".*ELBOW_PITCH.*": 4.3986, ".*ELBOW_YAW.*": 0.0621,
-        ".*WRIST_PITCH.*": 0.5657, ".*WRIST_ROLL.*": 0.1214,
     },
-
-    # damping={
-    #     ".*HIP_PITCH.*": 5.8, ".*HIP_ROLL.*": 4.2, ".*HIP_YAW.*": 2.0,
-    #     ".*KNEE_PITCH.*": 5.8, ".*ANKLE_PITCH.*": 0.6, ".*ANKLE_ROLL.*": 0.6, ".*TORSO.*": 2.0,
-    #     ".*SHOULDER_PITCH.*": 0.6, ".*SHOULDER_ROLL.*": 0.6, ".*SHOULDER_YAW.*": 0.6,
-    #     ".*ELBOW_PITCH.*": 0.6, ".*ELBOW_YAW.*": 0.25,
-    #     ".*WRIST_PITCH.*": 0.13, ".*WRIST_ROLL.*": 0.13,
-    # },
 
     encoder_bias={".*": 0.0},  # encoder bias in radians
     # note: modeling coulomb friction if friction = dynamic_friction
@@ -139,9 +124,9 @@ S800_ACTUATOR_CFG = PaceDCMotorCfg(
         # Per motor type: large (7520-22) 1.6, medium (7520-14) 1.0,
         # small (5020) 0.5, smallest (4010) 0.1
         ".*HIP_PITCH.*": 1.6, ".*HIP_ROLL.*": 1.6, ".*KNEE_PITCH.*": 1.6,
-        ".*HIP_YAW.*": 1.0, ".*TORSO.*": 1.0,
+        ".*HIP_YAW.*": 1.0,
         ".*ANKLE.*": 0.5, ".*SHOULDER.*": 0.5, ".*ELBOW_PITCH.*": 0.5,
-        ".*ELBOW_YAW.*": 0.1, ".*WRIST.*": 0.1,
+        ".*ELBOW_YAW.*": 0.1,
     },
     max_delay=10,  # max delay in simulation steps
 )
@@ -151,7 +136,10 @@ class S800PaceCfg(PaceCfg):
     """Pace configuration for s800 robot."""
     robot_name: str = "s800_sim"
     data_dir: str = "s800_sim/chirp_data.pt"  # located in pace_sim2real/data/s800/chirp_data.pt
-    bounds_params: torch.Tensor = torch.zeros((109, 2))  # s800 has 27 dof, 4n+1 -> 4 * 27 + 1 = 109 parameters to optimize
+    # 22 个可动关节。J12_TORSO_YAW 与 4 个 WRIST（J18/J19/J32/J33）已在
+    # assets_robot/engineai_S800/urdf/serial_s800_lock_wrist_torso.urdf 里改成 fixed，
+    # 转换时被 merge_fixed_joints 合并进父 link，因此不再是 articulation 的自由度。
+    # 理由见 docs/s800_single_part.md §8；资产改动由 scripts/lock_urdf_joints.py 生成（可重跑）。
     joint_order: list[str] = [
         "J00_HIP_PITCH_L",
         "J01_HIP_ROLL_L",
@@ -165,29 +153,30 @@ class S800PaceCfg(PaceCfg):
         "J09_KNEE_PITCH_R",
         "J10_ANKLE_PITCH_R",
         "J11_ANKLE_ROLL_R",
-        "J12_TORSO_YAW",
         "J13_SHOULDER_PITCH_L",
         "J14_SHOULDER_ROLL_L",
         "J15_SHOULDER_YAW_L",
         "J16_ELBOW_PITCH_L",
         "J17_ELBOW_YAW_L",
-        "J18_WRIST_PITCH_L",
-        "J19_WRIST_ROLL_L",
         "J27_SHOULDER_PITCH_R",
         "J28_SHOULDER_ROLL_R",
         "J29_SHOULDER_YAW_R",
         "J30_ELBOW_PITCH_R",
         "J31_ELBOW_YAW_R",
-        "J32_WRIST_PITCH_R",
-        "J33_WRIST_ROLL_R"
     ]
 
-    def __post_init__(self): #TODO
-        # set bounds for parameters
-        # self.bounds_params[:27, 0] = 1e-4
-        # self.bounds_params[:27, 1] = 1.0  # armature between 1e-5 - 1.0 [kgm2]
+    # 4 组参数（armature / 粘性阻尼 / 库仑摩擦 / 编码器零偏）各 n 个，加 1 个全局延时。
+    # 由 len(joint_order) 推出，不要再写死 —— 关节表一变，写死的维度会静默错位。
+    bounds_params: torch.Tensor = torch.zeros((4 * len(joint_order) + 1, 2))
 
-        # --- Armature [0:27]: per-joint-type bounds, bracket the round-trip GT ---
+    def __post_init__(self): #TODO
+        # 四段的块偏移一律由关节数推出。⚠️ 这里的切片越界 Python 不报错，只会把参数
+        # 静默写到错误的块里（cma_es 的 numel 检查也拦不住，因为两边维度是自洽的）。
+        n = len(self.joint_order)
+        assert self.bounds_params.shape == (4 * n + 1, 2), \
+            f"bounds_params 维度 {tuple(self.bounds_params.shape)} 与 {n} 个关节不符"
+
+        # --- Armature [0:n]: per-joint-type bounds, bracket the round-trip GT ---
         # GT is the 4-group ground truth injected by data_collection.py (see there).
         # Bounds must straddle GT, otherwise the optimizer can never reach the true
         # value and the round-trip test fails for a trivial reason.
@@ -198,14 +187,11 @@ class S800PaceCfg(PaceCfg):
             "KNEE_PITCH":     (0.05, 0.50),   # GT=0.24
             "ANKLE_PITCH":    (0.005, 0.15),  # GT=0.05
             "ANKLE_ROLL":     (0.005, 0.15),  # GT=0.05
-            "TORSO_YAW":      (0.01, 0.15),   # GT=0.05
             "SHOULDER_PITCH": (0.005, 0.15),  # GT=0.05
             "SHOULDER_ROLL":  (0.005, 0.15),  # GT=0.05
             "SHOULDER_YAW":   (0.005, 0.15),  # GT=0.05
             "ELBOW_PITCH":    (0.005, 0.15),  # GT=0.05
             "ELBOW_YAW":      (0.001, 0.03),  # GT=0.008
-            "WRIST_PITCH":    (0.0005, 0.02), # GT=0.008
-            "WRIST_ROLL":     (0.0005, 0.02), # GT=0.008
         }
 
         damping_bounds = {
@@ -215,17 +201,14 @@ class S800PaceCfg(PaceCfg):
             "KNEE_PITCH":     (0.0, 3.0),   # GT=1.6
             "ANKLE_PITCH":    (0.0, 1.0),  # GT=0.5
             "ANKLE_ROLL":     (0.0, 1.0),  # GT=0.5
-            "TORSO_YAW":      (0.0, 2.0),   # GT=1.0
             "SHOULDER_PITCH": (0.0, 1.0),  # GT=0.5
             "SHOULDER_ROLL":  (0.0, 1.0),  # GT=0.5
             "SHOULDER_YAW":   (0.0, 1.0),  # GT=0.5
             "ELBOW_PITCH":    (0.0, 1.0),  # GT=0.5
             "ELBOW_YAW":      (0.0, 0.5),  # GT=0.1
-            "WRIST_PITCH":    (0.0, 0.5), # GT=0.1
-            "WRIST_ROLL":     (0.0, 0.5), # GT=0.1
         }
 
-        # --- friction bounds [54:81]: 按关节缩放，不从 round-trip GT 反推 ---
+        # --- friction bounds [2n:3n]: 按关节缩放，不从 round-trip GT 反推 ---
         # 上界 = FRICTION_PEAK_FRAC × 关节侧峰值力矩。
         #
         # 为什么不能照 GT 设：round-trip 的 GT 是我们自己注入的已知值，用它去定
@@ -244,42 +227,42 @@ class S800PaceCfg(PaceCfg):
             # （gear=1，减速比已折进该值，单位即关节侧 Nm）
             "HIP_PITCH":      415.0, "HIP_ROLL": 370.0, "HIP_YAW": 222.0,
             "KNEE_PITCH":     415.0, "ANKLE_PITCH": 160.0, "ANKLE_ROLL": 160.0,
-            "TORSO_YAW":      222.0, "SHOULDER_PITCH": 160.0, "SHOULDER_ROLL": 160.0,
+            "SHOULDER_PITCH": 160.0, "SHOULDER_ROLL": 160.0,
             "SHOULDER_YAW":   160.0, "ELBOW_PITCH": 160.0,
             "ELBOW_YAW":       52.0,
-            "WRIST_PITCH":     5.0, "WRIST_ROLL": 5.0,
         }
 
         print(f"joint order = {self.joint_order}")
 
         for i, name in enumerate(self.joint_order):
-            jtype = name[4:].rsplit("_", 1)[0] if name.endswith(("_L", "_R")) else name[4:]  # "J00_HIP_PITCH_L" -> "HIP_PITCH", "J12_TORSO_YAW" -> "TORSO_YAW"
-            # armature [0:27]
+            jtype = name[4:].rsplit("_", 1)[0] if name.endswith(("_L", "_R")) else name[4:]  # "J00_HIP_PITCH_L" -> "HIP_PITCH"
+            # armature [0:n]
             lo, hi = armature_bounds[jtype]
             self.bounds_params[i, 0] = lo
             self.bounds_params[i, 1] = hi
-            # damping (viscous friction) [27:54]
+            # damping (viscous friction) [n:2n]
             d_lo, d_hi = damping_bounds[jtype]
-            self.bounds_params[27 + i, 0] = d_lo
-            self.bounds_params[27 + i, 1] = d_hi
-            # friction (coulomb) [54:81] — 下界一律 0（摩擦可以接近 0）
-            self.bounds_params[54 + i, 0] = 0.0
-            self.bounds_params[54 + i, 1] = FRICTION_PEAK_FRAC * PEAK_TORQUE[jtype]
+            self.bounds_params[n + i, 0] = d_lo
+            self.bounds_params[n + i, 1] = d_hi
+            # friction (coulomb) [2n:3n] — 下界一律 0（摩擦可以接近 0）
+            self.bounds_params[2 * n + i, 0] = 0.0
+            self.bounds_params[2 * n + i, 1] = FRICTION_PEAK_FRAC * PEAK_TORQUE[jtype]
 
         # ── 对照组覆盖：三段 bounds 压成全场统一（见文件顶部 UNIFORM_GT 说明）──
         # 放在逐关节循环之后，覆盖上面按类型设好的值；bias/delay 不受影响。
         if UNIFORM_GT:
-            for _sl, _key in ((slice(0, 27), "armature"), (slice(27, 54), "damping"), (slice(54, 81), "friction")):
+            for _sl, _key in ((slice(0, n), "armature"), (slice(n, 2 * n), "damping"),
+                              (slice(2 * n, 3 * n), "friction")):
                 _lo, _hi = UNIFORM_BOUNDS[_key]
                 self.bounds_params[_sl, 0] = _lo
                 self.bounds_params[_sl, 1] = _hi
             print(f"[UNIFORM_GT] 对照组 bounds 已启用: {UNIFORM_BOUNDS}")
             print("[UNIFORM_GT] ⚠️ 确认 data_collection.py 用了 --uniform_gt，且值落在上述区间内。")
 
-        self.bounds_params[81:108, 0] = -0.1
-        self.bounds_params[81:108, 1] = 0.1  # bias between -0.1 - 0.1 [rad]
+        self.bounds_params[3 * n:4 * n, 0] = -0.1
+        self.bounds_params[3 * n:4 * n, 1] = 0.1  # bias between -0.1 - 0.1 [rad]
 
-        self.bounds_params[108, 1] = 10.0  # delay between 0.0 - 10.0 [sim steps]
+        self.bounds_params[4 * n, 1] = 10.0  # delay between 0.0 - 10.0 [sim steps]
 
 # @configclass
 # class S800PaceSceneCfg(PaceSim2realSceneCfg):
@@ -293,7 +276,10 @@ class S800PaceSceneCfg(PaceSim2realSceneCfg):
     robot: ArticulationCfg = ArticulationCfg(
         prim_path="{ENV_REGEX_NS}/Robot",
         spawn=UsdFileCfg(
-            usd_path="/home/samsung/Humanoid/pace-sim2real/assets_robot/engineai_S800/usd/serial_s800.usda",
+            # 22 自由度版本（锁定 J12 + 4 个 WRIST）。由
+            # scripts/lock_urdf_joints.py + IsaacLab 的 convert_urdf.py 生成，见 docs/s800_single_part.md §8。
+            # 旧的 27 自由度资产仍在 assets_robot/engineai_S800/usd/serial_s800.usda，未改动，可随时切回。
+            usd_path="/home/samsung/Humanoid/pace-sim2real/assets_robot/engineai_S800/usd_locked/serial_s800_lock_wrist_torso.usda",
             # usd_path="/home/samsung/Humanoid/pace-sim2real/assets_robot/s800/usd_merge_joints/serial_robot_s_42dof/serial_robot_s_42dof.usda",
             # usd_path="/home/samsung/Humanoid/pace-sim2real/assets_robot/s800/usd_no_inertia/serial_robot_s_42dof/serial_robot_s_42dof.usda",
             rigid_props=sim_utils.RigidBodyPropertiesCfg(

@@ -9,6 +9,11 @@ from s800_clearance import with_midpoints
 def nominal_motion(joint_names):
     # Explicit centers preserve the former bias*direction*scale pose. Changing an
     # amplitude below no longer moves the center. Encoder bias is a separate value.
+    #
+    # 注：下面的 WRIST_* / TORSO_YAW 条目在当前模型里已用不到（J12 与 4 个 WRIST
+    #     在 serial_s800_lock_wrist_torso.urdf 里锁定，见 docs/s800_single_part.md §8）。
+    #     保留是因为本函数是「按名字查表」的通用映射，不跟随 joint_order 增删；
+    #     多余的 key 不会被查到，也就不会是错的。若将来解锁，这里原值即可复用。
     centers = {"HIP_PITCH": 0., "HIP_ROLL": .045, "HIP_YAW": 0., "KNEE_PITCH": .523,
                "ANKLE_PITCH": 0., "ANKLE_ROLL": -.009135,
                "SHOULDER_PITCH": 0., "SHOULDER_ROLL": .3156, "SHOULDER_YAW": 0.,
