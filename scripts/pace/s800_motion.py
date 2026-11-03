@@ -18,8 +18,11 @@ def nominal_motion(joint_names):
                "ANKLE_PITCH": 0., "ANKLE_ROLL": -.009135,
                "SHOULDER_PITCH": 0., "SHOULDER_ROLL": .3156, "SHOULDER_YAW": 0.,
                "ELBOW_PITCH": -.3012, "ELBOW_YAW": 0., "WRIST_PITCH": 0., "WRIST_ROLL": -.00655}
-    amplitudes = {"HIP_PITCH": .5, "HIP_ROLL": .3, "HIP_YAW": .7, "KNEE_PITCH": .5,
-                  "ANKLE_PITCH": .272, "ANKLE_ROLL": .105,
+    # Reduce lateral/twisting excitation while retaining the original center pose.
+    # At scale_factor=0.8: hip roll/yaw and ankle roll amplitudes are .048/.08/.032 rad.
+    # Command geometry checked offline; actual tracking still needs a new recording.
+    amplitudes = {"HIP_PITCH": .5, "HIP_ROLL": .06, "HIP_YAW": .10, "KNEE_PITCH": .5,
+                  "ANKLE_PITCH": .272, "ANKLE_ROLL": .04,
                   "SHOULDER_PITCH": .35, "SHOULDER_ROLL": .3, "SHOULDER_YAW": .25,
                   "ELBOW_PITCH": .3, "ELBOW_YAW": .15, "WRIST_PITCH": .05, "WRIST_ROLL": .05}
     mirrored = {"HIP_ROLL", "HIP_YAW", "ANKLE_ROLL", "SHOULDER_ROLL", "SHOULDER_YAW", "ELBOW_YAW", "WRIST_ROLL"}
