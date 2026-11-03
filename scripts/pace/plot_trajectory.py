@@ -76,16 +76,28 @@ mean = torch.load(params_path)
 config = torch.load(log_dir / "config.pt")
 
 joint_order = config["joint_order"]
+# Keep original indices: checkpoints and trajectories still contain all joints.
+# Use the fitted subset, not the excited subset (they can differ).
+selected = config.get("fit", {}).get("fitted_joints")
+if selected is None:
+    selected = list(range(len(joint_order)))
+    print("[plot] No fitted-joint metadata; showing all joints (legacy run).")
+else:
+    selected = list(selected)
+    if (not selected or any(not isinstance(i, int) or i < 0 or i >= len(joint_order) for i in selected)
+            or len(set(selected)) != len(selected)):
+        raise ValueError("Invalid fit.fitted_joints in config.pt")
+    print(f"[plot] Showing {len(selected)}/{len(joint_order)} fitted joints; frozen joints are hidden.")
+print(f"[plot] Joints: {', '.join(joint_order[i] for i in selected)}")
 trajectories = torch.load(log_dir / "best_trajectory.pt")  # time x joints
 real_trajectories = config["dof_pos"]  # time x joints
 target_trajectories = config["des_dof_pos"]  # time x joints
 time = config["time"]  # time
 
-print(f"Best parameter set: {mean}")
-print(f"Armature params: {mean[:len(joint_order)]}")
-print(f"Viscous friction params: {mean[len(joint_order):2 * len(joint_order)]}")
-print(f"Static/dynamic friction params: {mean[2 * len(joint_order):3 * len(joint_order)]}")
-print(f"Encoder bias params: {mean[3 * len(joint_order):4 * len(joint_order)]}")
+print(f"Armature params: {mean[:len(joint_order)][selected]}")
+print(f"Viscous friction params: {mean[len(joint_order):2 * len(joint_order)][selected]}")
+print(f"Static/dynamic friction params: {mean[2 * len(joint_order):3 * len(joint_order)][selected]}")
+print(f"Encoder bias params: {mean[3 * len(joint_order):4 * len(joint_order)][selected]}")
 print(f"Delay param: {mean[-1].item()}")
 encoder_bias = mean[3 * len(joint_order):4 * len(joint_order)]  # extract encoder bias
 
@@ -111,7 +123,7 @@ if plot_score:
     plt.show()
 
 if plot_trajectory:
-    for i in range(len(joint_order)):
+    for i in selected:
         plt.figure(figsize=(8, 4.5))
         plt.plot(time, trajectories[:, i].cpu().numpy() - encoder_bias[i].item(), c="tab:orange", label="Sim", linewidth=2)  # in encoder frame
         plt.plot(time, real_trajectories[:, i].cpu().numpy(), label="Real", c="tab:green", linestyle="--", linewidth=2)
@@ -227,7 +239,8 @@ if plot_table:
 
     csv_rows = []
 
-    for i, name in enumerate(joint_order):
+    for i in selected:
+        name = joint_order[i]
         # Ground truth
         a_gt = GT_ARMATURE.get(name, 0.0)
         v_gt = GT_VISCOUS.get(name, 0.0)

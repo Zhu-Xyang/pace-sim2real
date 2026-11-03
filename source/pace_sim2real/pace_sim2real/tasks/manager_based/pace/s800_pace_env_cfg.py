@@ -318,5 +318,8 @@ class S800PaceEnvCfg(PaceSim2realEnvCfg):
         self.scene.robot.spawn.articulation_props.fix_root_link = True
 
         # robot sim and control settings
-        self.sim.dt = 0.0025  # 400Hz simulation
-        self.decimation = 1  # 400Hz control
+        # self.sim.dt = 0.0025  # 400Hz simulation
+        # self.decimation = 1  # 400Hz control
+
+        self.sim.dt = 0.005  # 200Hz simulation
+        self.decimation = 1  # 200Hz control

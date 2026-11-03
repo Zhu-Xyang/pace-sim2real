@@ -129,6 +129,15 @@ floor test，让错延时在自检阶段就暴露（第 8 节那次 7 小时的�
 
 ## 4. 验收与报告
 
+`plot_trajectory.py` 自动读取运行目录 `config.pt` 中的 `fit.fitted_joints`，终端参数、参数对比表、`param_comparison.csv` 和轨迹图都只显示本轮拟合的关节；全局 delay 仍保留。没有拟合关节记录的旧日志会提示并显示全部关节。
+
+```bash
+python scripts/pace/plot_trajectory.py --robot_name s800_sim_arms_command \
+    --folder_name <拟合时间戳> --mean_name mean_50.pt --plot_table --plot_trajectory
+```
+
+腿部运行将 `--robot_name` 换为 `s800_sim_legs_command`，checkpoint 文件名按实际文件填写。参数表使用指定的 `mean_*.pt`，轨迹图仍读取 `best_trajectory.pt`，不是该均值参数的重新回放。
+
 ```bash
 python scripts/pace/eval_group.py --run logs/pace/s800_sim_legs_command/<拟合时间戳>
 ```

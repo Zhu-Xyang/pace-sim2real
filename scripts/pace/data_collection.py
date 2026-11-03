@@ -28,7 +28,7 @@ parser.add_argument("--group", choices=("all", "legs", "torso", "arms"), default
                     help="只激励这一组，其余关节维持中心目标；arms 含手腕、不含手指。")
 parser.add_argument("--delay_mode", choices=("command", "torque"), default=None,
                     help="分组实验默认 command；原全身实验默认 torque。")
-parser.add_argument("--delay_steps", type=int, default=5, help="仿真注入的整数延时步数。")
+parser.add_argument("--delay_steps", type=int, default=4, help="200hz下仿真注入的整数延时步数。")
 parser.add_argument("--rest", type=float, default=1.0, help="扫频前后各静止多少秒。")
 parser.add_argument("--ramp", type=float, default=2.0, help="扫频首尾各淡入淡出多少秒。")
 parser.add_argument("--self_collisions", action=argparse.BooleanOptionalAction, default=None,
@@ -132,7 +132,7 @@ def main():
     #    增删平移，错了不报错，只是静默把参数灌到别的关节上。
     # 4 组 armature: 0.24(大关节) / 0.14(髋侧摆) / 0.05(中小关节) / 0.008(末端)
     GT_ARMATURE_BY_TYPE = {
-        "HIP_PITCH": 0.36, "HIP_ROLL": 0.14, "HIP_YAW": 0.05, "KNEE_PITCH": 0.24,
+        "HIP_PITCH": 0.24, "HIP_ROLL": 0.14, "HIP_YAW": 0.05, "KNEE_PITCH": 0.24,
         "ANKLE_PITCH": 0.05, "ANKLE_ROLL": 0.05,
         "SHOULDER_PITCH": 0.05, "SHOULDER_ROLL": 0.05, "SHOULDER_YAW": 0.05,
         "ELBOW_PITCH": 0.05, "ELBOW_YAW": 0.008,
@@ -156,7 +156,7 @@ def main():
     #   中小关节                       PD力矩  4-70Nm   → 0.3
     #   末端(ELBOW_YAW)                PD力矩  0.6-1.5Nm → 0.05
     GT_FRICTION_BY_TYPE = {
-        "HIP_PITCH": 2.0, "HIP_ROLL": 1.0, "HIP_YAW": 0.3, "KNEE_PITCH": 1.0,
+        "HIP_PITCH": 1.0, "HIP_ROLL": 1.0, "HIP_YAW": 0.3, "KNEE_PITCH": 1.0,
         "ANKLE_PITCH": 0.3, "ANKLE_ROLL": 0.3,
         "SHOULDER_PITCH": 0.3, "SHOULDER_ROLL": 0.3, "SHOULDER_YAW": 0.3,
         "ELBOW_PITCH": 0.3, "ELBOW_YAW": 0.05,
@@ -229,6 +229,7 @@ def main():
 
     duration = args_cli.duration  # seconds
     sample_rate = 1 / env.unwrapped.sim.get_physics_dt()  # Hz
+    log_interval_steps = max(1, round(sample_rate))  # About one simulated second.
     num_steps = int(duration * sample_rate)
     t = torch.arange(num_steps, device=env.unwrapped.device) / sample_rate
     f0 = args_cli.min_frequency  # Hz
@@ -336,7 +337,7 @@ def main():
             obs, _, _, _, _ = env.step(actions)
             dof_target_pos_buffer[counter, :] = commands[counter]
             counter += 1
-            if counter % 400 == 0:
+            if counter % log_interval_steps == 0:
                 print(f"[INFO]: Step {counter/sample_rate} seconds")
             if counter >= num_steps:
                 break

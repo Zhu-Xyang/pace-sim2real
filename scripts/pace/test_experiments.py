@@ -29,7 +29,7 @@ class ExperimentTests(unittest.TestCase):
                   damping=torch.tensor([.3, .4]), friction=torch.tensor([.5, .6]),
                   bias=torch.tensor([.01, .02]), delay=3.)
         with tempfile.TemporaryDirectory() as directory:
-            values = dict(plot_table=True, joint_order=names, config={"gt": gt},
+            values = dict(plot_table=True, joint_order=names, selected=[0, 1], config={"gt": gt},
                           mean=torch.ones(9), log_dir=Path(directory), csv=csv,
                           GT_ARMATURE={}, GT_VISCOUS={}, GT_FRICTION={}, GT_BIAS=.05, GT_DELAY=5)
             with patch("builtins.print"):

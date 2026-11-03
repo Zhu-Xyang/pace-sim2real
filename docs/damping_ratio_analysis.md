@@ -1,18 +1,252 @@
 # S800 关节阻尼比与固有频率计算
 
-## 物理模型
+> 阅读说明（2026-10-30 补充）：前面的完整动力学说明用于解释 PhysX 如何同时考虑连杆惯性、关节耦合与 armature。后面的逐关节数值表是历史配置下的等效分析，本次未重新计算；其中旧模型路径、增益和关节数量不应直接视为当前运行配置。
 
-PhysX 求解的二阶系统：
+## 完整多关节动力学与质量矩阵
+
+### 1. 完整方程与各项含义
+
+对于固定基座、以关节角作为广义坐标、暂不考虑接触和额外约束力的机器人，可以写成：
+
+$$
+M_{\mathrm{eff}}(q)\ddot q+C(q,\dot q)\dot q+g(q)+\tau_f=\tau.
+$$
+
+| 符号 | 含义 |
+| --- | --- |
+| $q,\dot q,\ddot q$ | 关节位置、速度、加速度向量 |
+| $M_{\mathrm{eff}}(q)$ | 实际动力学中的关节空间质量／惯性矩阵；本节用下标强调它包含配置的 armature |
+| $C(q,\dot q)\dot q$ | 科里奥利与离心作用形成的速度相关广义力 |
+| $g(q)$ | 重力广义力；在当前符号约定下，静止且忽略摩擦时，需要 $\tau=g(q)$ 来平衡重力 |
+| $\tau_f$ | 放在方程左侧的摩擦／耗散项，例如粘性阻尼与库仑摩擦；它不是 PD 控制器的微分增益 |
+| $\tau$ | 输入到关节的驱动力矩，例如经过限幅与延迟处理后的 PD 力矩 |
+
+这里的 $C$ 矩阵表示方式不唯一，通常关心的是乘积 $C(q,\dot q)\dot q$，也可以直接记为速度相关项 $h_v(q,\dot q)$。
+
+存在足地接触、外力或其他约束时，还需加入相应的广义力，例如右侧增加 $J_c(q)^T\lambda$。浮动基座模型还包含基座自由度，驱动力通过选择矩阵映射到广义坐标，不能直接将关节力矩向量当作整个系统的广义力向量。
+
+**将两关节完整方程展开成矩阵与列向量相乘的形式：**
+
+$$
+\begin{aligned}
+&\underbrace{\begin{bmatrix}
+m_{11}(q)+I_{a,1}&m_{12}(q)\\
+m_{21}(q)&m_{22}(q)+I_{a,2}
+\end{bmatrix}}_{M_{\mathrm{eff}}(q)}
+\begin{bmatrix}\ddot q_1\\\ddot q_2\end{bmatrix}
++\underbrace{\begin{bmatrix}
+C_{11}(q,\dot q)&C_{12}(q,\dot q)\\
+C_{21}(q,\dot q)&C_{22}(q,\dot q)
+\end{bmatrix}}_{C(q,\dot q)}
+\begin{bmatrix}\dot q_1\\\dot q_2\end{bmatrix}\\[6pt]
+&\qquad+
+\underbrace{\begin{bmatrix}g_1(q)\\g_2(q)\end{bmatrix}}_{\text{重力项}}
++\underbrace{\begin{bmatrix}\tau_{f,1}\\\tau_{f,2}\end{bmatrix}}_{\text{摩擦项}}
+=\underbrace{\begin{bmatrix}\tau_1\\\tau_2\end{bmatrix}}_{\text{驱动力矩}}.
+\end{aligned}
+$$
+
+这里小写 $m_{ij}$ 专指连杆质量矩阵 $M_{\mathrm{links}}$ 的元素，大写 $M_{ij}$ 则表示包含 armature 后的有效质量矩阵元素，即 $M_{ii}=m_{ii}+I_{a,i}$，$M_{ij}=m_{ij}$（$i\ne j$）。$m_{12}=m_{21}$，但 $C$ 一般不对称。
+
+### 2. 矩阵元素、行和列分别表示什么
+
+将惯性力矩单独记为 $\tau_{\mathrm{inertia}}=M\ddot q$。以两个转动关节为例，在给定构型下：
+
+$$
+M(q)=\begin{bmatrix}
+M_{11}(q)&M_{12}(q)\\
+M_{21}(q)&M_{22}(q)
+\end{bmatrix},
+\qquad
+\begin{aligned}
+\tau_{\mathrm{inertia},1}&=M_{11}\ddot q_1+M_{12}\ddot q_2,\\
+\tau_{\mathrm{inertia},2}&=M_{21}\ddot q_1+M_{22}\ddot q_2.
+\end{aligned}
+$$
+
+- **$M_{ij}$ 是系数，不是力矩本身**：$M_{ij}\ddot q_j$ 才是关节 $j$ 的加速度对关节 $i$ 惯性力矩的贡献。对于全为转动关节的模型，矩阵元素通常以 kg·m² 表示。
+- **第 $i$ 行**：所有关节加速度如何共同决定关节 $i$ 的惯性力矩。
+- **第 $j$ 列**：只有第 $j$ 个广义加速度非零时，各关节需要承担的惯性力矩分布。
+- **对角项 $M_{ii}$**：其他广义加速度为零时，关节 $i$ 对应的等效惯量。它包含由该关节带动的连杆贡献，并不只是电机或某一个连杆自身的惯量。
+- **非对角项 $M_{ij}$**：不同自由度之间的惯性耦合系数，可以为正、为负或为零，不能简单解释成“干扰大小”。
+
+例如，假设某一构型下：
+
+$$
+M=\begin{bmatrix}4&1\\1&2\end{bmatrix},\qquad
+\ddot q=\begin{bmatrix}0\\3\end{bmatrix},
+\qquad
+\tau_{\mathrm{inertia}}=\begin{bmatrix}3\\6\end{bmatrix}.
+$$
+
+此时即使关节 1 的加速度为零，为了实现指定的加速度组合，关节 1 仍需承担 3 N·m 的惯性力矩。这只是示意算例，不是 S800 实测参数，也还没有加上重力和摩擦等项。
+
+### 3. 对称性与“施加力矩后会怎样运动”的区别
+
+标准刚体动力学的动能可以写成：
+
+$$
+T(q,\dot q)=\tfrac12\dot q^T M(q)\dot q.
+$$
+
+质量矩阵可由动能对广义速度的二阶导数得到，因此 $M=M^T$。在独立、非退化的广义坐标及有效惯性参数下，它是正定的。对称性意味着对应行列的元素互为转置，但行与列的解释角度仍然不同。
+
+**给定加速度求惯性力矩，使用 $M\ddot q$；给定力矩求运动响应，则要解完整动力学方程。** 忽略约束时，数学上可以表示为：
+
+$$
+\ddot q=M_{\mathrm{eff}}^{-1}(q)
+\bigl[\tau-C(q,\dot q)\dot q-g(q)-\tau_f\bigr].
+$$
+
+所以，不能仅用 $M_{ij}$ 判断“给关节 $j$ 一个力矩后，关节 $i$ 会有多大加速度”。若其他关节可以自由运动，驱动点看到的瞬时等效惯量也未必等于 $M_{ii}$。例如，扣除其他动力学项、只在第 $i$ 维施加净力矩且无额外约束时，响应由 $(M^{-1})_{ii}$ 决定，对应等效惯量为 $1/(M^{-1})_{ii}$。
+
+### 4. 连杆质量、惯性和 armature 如何进入矩阵
+
+连杆部分由各连杆的质量、质心位置、质心处惯性张量，以及运动学关系共同决定。概念上可以写为：
+
+$$
+M_{\mathrm{links}}(q)=\sum_k\left[
+m_k J_{v,k}(q)^T J_{v,k}(q)
++J_{\omega,k}(q)^T I_k^{\mathrm{world}}(q)J_{\omega,k}(q)
+\right].
+$$
+
+其中，$J_{v,k}$ 是连杆质心的线速度雅可比，$J_{\omega,k}$ 是角速度雅可比，$I_k^{\mathrm{world}}$ 是以质心为原点、旋转到世界坐标轴表达的惯性张量。这说明质量分布、姿态与关节连接关系都会影响矩阵，包括非对角项。
+
+对当前固定基座、各活动关节独立配置标量 armature 的模型：
+
+$$
+M_{\mathrm{eff}}(q)=M_{\mathrm{links}}(q)
++\operatorname{diag}(I_{a,1},\ldots,I_{a,n}).
+$$
+
+展开为 $n$ 关节的矩阵：
+
+$$
+\begin{aligned}
+M_{\mathrm{eff}}(q)
+&=\begin{bmatrix}
+m_{11}(q)&m_{12}(q)&\cdots&m_{1n}(q)\\
+m_{21}(q)&m_{22}(q)&\cdots&m_{2n}(q)\\
+\vdots&\vdots&\ddots&\vdots\\
+m_{n1}(q)&m_{n2}(q)&\cdots&m_{nn}(q)
+\end{bmatrix}
++\begin{bmatrix}
+I_{a,1}&0&\cdots&0\\
+0&I_{a,2}&\cdots&0\\
+\vdots&\vdots&\ddots&\vdots\\
+0&0&\cdots&I_{a,n}
+\end{bmatrix}\\[6pt]
+&=\begin{bmatrix}
+m_{11}(q)+I_{a,1}&m_{12}(q)&\cdots&m_{1n}(q)\\
+m_{21}(q)&m_{22}(q)+I_{a,2}&\cdots&m_{2n}(q)\\
+\vdots&\vdots&\ddots&\vdots\\
+m_{n1}(q)&m_{n2}(q)&\cdots&m_{nn}(q)+I_{a,n}
+\end{bmatrix}.
+\end{aligned}
+$$
+
+当前 S800 模型的固定基座、锁定腰与腕配置下，$n=22$，因此这里的关节空间矩阵为 $22\times22$，位置、速度、加速度和力矩向量为 $22\times1$。矩阵下标应按照仿真自由度顺序解释，不等于关节名称里的 `J00`、`J13` 等编号；与 PACE 的 `joint_order` 对照时需要按名称映射。
+
+armature 是额外加入的关节侧惯量；简单减速传动下可由 $N^2J_{\mathrm{rotor}}$ 折算而来。PACE 辨识的则是所选模型下的有效参数，不必严格等于单独测量的转子惯量折算值。
+
+**armature 不会替代连杆惯量，也不等于整根连杆的质量或惯性张量。** 改变它直接改变对应对角项，但求解整个耦合系统后的运动变化可能出现在多个关节上。
+
+也不是任意两个关节之间都必然有非零耦合：理想刚性固定基座上的独立分支，在没有共同活动祖先关节、接触等额外耦合时，可以形成分块结构。不能仅凭“全身一起仿真”就断言腿部参数一定影响手臂轨迹。
+
+### 5. Isaac Sim／PhysX 实际如何处理
+
+Isaac Sim 的 PhysX articulation 将关节连接的连杆作为一个多体系统处理，而不是将每个关节当成彼此独立的固定惯量电机。它根据已加载到仿真中的质量、质心、惯性、关节连接和当前状态计算运动响应，并处理驱动力、重力、速度相关力及约束。
+
+**上述矩阵方程描述其动力学关系，但不代表求解器每一步都显式构造一个稠密矩阵，再执行一次矩阵求逆。** 降维坐标多体动力学可以通过递推等算法计算等价响应；接触和限位等还需要约束求解。因此，“仿真考虑了 $M(q)$ 表示的惯性耦合”与“每一步调用质量矩阵查询 API”是不同的说法。
+
+PhysX 官方提供质量矩阵计算接口。不同版本的接口名称包括 `computeGeneralizedMassMatrix` 和 `computeMassMatrix`，用于取得广义加速度到广义力的惯性映射。查询时必须核对固定／浮动基座、自由度顺序、矩阵维度与版本约定。
+
+本项目的实际参数写入链路是：
+
+```text
+机器人 URDF → 转换并加载 USD → PhysX 中的连杆质量、质心、惯性和关节结构
+PACE 参数候选 → write_joint_armature_to_sim(...)
+             → root_physx_view.set_dof_armatures(...)
+PD／限幅／延迟处理后的力矩 → PhysX 多体动力学求解 → 关节轨迹
+```
+
+本机 Isaac Lab 的 `Articulation.write_joint_armature_to_sim()` 文档明确说明 armature 直接加入对应的关节空间惯量。项目调用位置见 [data_collection.py](../scripts/pace/data_collection.py) 与 [cma_es.py](../source/pace_sim2real/pace_sim2real/optim/cma_es.py)。这意味着：**PACE 只搜索 armature、阻尼、摩擦等部分参数，并不意味着其轨迹评估忽略了模型原有的连杆动力学与关节耦合。** 仿真实际使用的是加载后的 USD 属性；修改 URDF 后也需要确保重新转换或更新的属性确实进入仿真。
+
+### 6. 注意：查询到的质量矩阵是否包含 armature，需要单独核验
+
+“实际仿真考虑 armature”和“质量矩阵查询返回值已经包含 armature”不能混为一谈。PhysX 官方仓库的 issue #575 报告了部分版本中两者不一致的情况：仿真加速度包含 armature 的作用，但质量矩阵查询返回值没有包含它。该报告涉及 PhysX 5.11.0、5.9.0 相关代码及 Isaac Sim 6.1.0；**这里引用的是问题报告，没有对本机安装版本进行运行复现，不能直接断言本机具有相同行为。**
+
+若后续需要从仿真读取矩阵进行控制器设计，可在相同构型下改变一个关节的 armature，比较查询矩阵的变化，并用简化单关节、无重力无摩擦条件下的力矩—加速度关系交叉验证。在确认接口行为前，不应盲目再加一次 `diag(armature)`，以免重复计算。
+
+参考依据：
+
+- [PhysX 5.3 Articulations：降维坐标、动力学与广义质量矩阵](https://nvidia-omniverse.github.io/PhysX/physx/5.3.0/docs/Articulations.html)
+- [PhysX 5.7 Articulations：Generalized Mass Matrix](https://nvidia-omniverse.github.io/PhysX/physx/5.7.0/docs/Articulations.html)
+- [PhysX issue #575：质量矩阵和关节力查询遗漏 armature 的报告](https://github.com/NVIDIA-Omniverse/PhysX/issues/575)
+- 本机源码：`/home/samsung/Humanoid/IsaacLab/source/isaaclab/isaaclab/assets/articulation/articulation.py` 中的 `write_joint_armature_to_sim()`。
+
+### 7. 加入 PD 控制后的矩阵形式
+
+为展示结构，先假设无延迟、无饱和，且编码器偏置已校准。将摩擦分为粘性项与其余项：$\tau_f=D_v\dot q+\tau_c$。对于独立的逐关节 PD，两个关节的增益矩阵和粘性阻尼矩阵为：
+
+$$
+K_p=\begin{bmatrix}k_{p,1}&0\\0&k_{p,2}\end{bmatrix},\qquad
+K_d=\begin{bmatrix}k_{d,1}&0\\0&k_{d,2}\end{bmatrix},\qquad
+D_v=\begin{bmatrix}d_1&0\\0&d_2\end{bmatrix}.
+$$
+
+PD 力矩为 $\tau=K_p(q_d-q)+K_d(\dot q_d-\dot q)+\tau_{\mathrm{ff}}$。代入完整方程得到：
+
+$$
+M_{\mathrm{eff}}(q)\ddot q+
+\bigl[C(q,\dot q)+D_v+K_d\bigr]\dot q
++K_pq+g(q)+\tau_c
+=K_pq_d+K_d\dot q_d+\tau_{\mathrm{ff}}.
+$$
+
+**PD 增益矩阵为对角矩阵，并不意味着机器人动力学解耦**：$M_{\mathrm{eff}}$ 及速度相关项仍然可以有非对角耦合。当前采集器主要发送位置目标，控制器中的目标速度通常设为零；它不等于目标位置轨迹在数学上的导数。
+
+在静止平衡点 $q_0$ 附近，固定目标、无额外约束，且忽略不可微库仑摩擦等影响时，可将扰动方程写为：
+
+$$
+\underbrace{\begin{bmatrix}
+m_{11}^0+I_{a,1}&m_{12}^0\\
+m_{21}^0&m_{22}^0+I_{a,2}
+\end{bmatrix}}_{M_0}
+\begin{bmatrix}\delta\ddot q_1\\\delta\ddot q_2\end{bmatrix}
++\underbrace{\begin{bmatrix}
+d_1+k_{d,1}&0\\0&d_2+k_{d,2}
+\end{bmatrix}}_{D_0}
+\begin{bmatrix}\delta\dot q_1\\\delta\dot q_2\end{bmatrix}
++\underbrace{\begin{bmatrix}
+k_{p,1}+G_{11}&G_{12}\\
+G_{21}&k_{p,2}+G_{22}
+\end{bmatrix}}_{K_0}
+\begin{bmatrix}\delta q_1\\\delta q_2\end{bmatrix}
+=\begin{bmatrix}0\\0\end{bmatrix}.
+$$
+
+其中 $m_{ij}^0=m_{ij}(q_0)$，$G_{ij}=\left.\partial g_i/\partial q_j\right|_{q_0}$；这里假设前馈力矩在平衡点附近不随状态变化。若存在随姿态变化的精确重力补偿，重力的线性化贡献可被抵消；若有延迟、饱和或接触，则需要相应修改上述模型。$n$ 关节时同样成立：$M_0\delta\ddot q+D_0\delta\dot q+K_0\delta q=0$，各矩阵扩展为 $n\times n$。
+
+## 单关节等效物理模型（用于下文近似分析）
+
+以下是用于估算单关节固有频率与阻尼比的二阶近似，不是完整的 PhysX 多体求解方程：
 
 ```
 I_total · q̈ + (d + kd) · q̇ + kp · q = τ_cmd
 ```
 
 其中：
+
 - `I_total = Ia + I_link`（armature 惯量 + 下游连杆等效惯量）
 - `d` = viscous_friction（电机粘性摩擦系数）
 - `kd` = PD 控制器的微分增益
 - `kp` = PD 控制器的比例增益
+
+这里将其他关节近似保持不动，并在给定姿态附近把等效惯量视为常数；还忽略或另行处理了速度耦合、重力在平衡点附近的变化、接触、摩擦非线性、限幅与延迟。若这些因素显著，下面的频率与阻尼比只是近似，不能视为整个机器人的精确模态。
+
+完整无约束线性化模型通常需要考虑 $M_0\,\delta\ddot q+D_0\,\delta\dot q+K_0\,\delta q=0$，其中 $K_0$ 还可能包含重力线性化等贡献。此时应分析整个耦合系统的特征值，不能仅逐项使用 $\sqrt{k_{p,i}/M_{ii}}$。下文历史公式将除以 $2\pi$ 后的 Hz 量记为 `ω_n`；严格符号应记为 $f_n$，而 $\omega_n$ 的单位是 rad/s。
 
 ## 计算公式
 
