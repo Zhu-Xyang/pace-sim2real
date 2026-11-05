@@ -1,0 +1,250 @@
+<mujoco model="serial_links">
+    <body name="LINK_HIP_PITCH_L" pos="0 0.073634 0.0049286">
+        <inertial pos="0.009027 0.0443441 -0.0955939" mass="3.3334299" fullinertia="0.0069902 0.0082066 0.0042974 -4.64e-05 0.0004541 0.0004799" />
+        <geom class="visual" type="mesh" mesh="LINK_HIP_PITCH_L" />
+        <joint name="J00_HIP_PITCH_L" pos="0 0 0" axis="0 0.965926 -0.258819" range="-3.316 2.269" actuatorfrcrange="-415 415" damping="1.6" frictionloss="1" armature="0.2427264" />
+        <body name="LINK_HIP_ROLL_L" pos="0.0005126 0.045866 -0.109">
+            <inertial pos="0.0431731 0.0034371 -0.0499355" mass="0.8887822" fullinertia="0.002974 0.0029534 0.0023275 3.64e-05 -0.000583 8.86e-05" />
+            <geom class="visual" type="mesh" mesh="LINK_HIP_ROLL_L" />
+            <joint name="J01_HIP_ROLL_L" pos="0 0 0" axis="1 0 0" range="-1.082 2.059" actuatorfrcrange="-370 370" damping="1.6" frictionloss="1" armature="0.14110848" />
+            <geom class="collision_hip_roll_left" />
+            <body name="LINK_HIP_YAW_L" pos="0.0137 0 -0.10421">
+                <inertial pos="-0.0049756 0.0018226 -0.093164" mass="3.5658205" fullinertia="0.0343658 0.033924 0.0079499 0.0001156 -0.0028385 0.0004225" />
+                <geom class="visual" type="mesh" mesh="LINK_HIP_YAW_L" />
+                <joint name="J02_HIP_YAW_L" pos="0 0 0" axis="0 0 1" range="-1.42245 3.8921" actuatorfrcrange="-222 222" damping="1.6" frictionloss="1" armature="0.0448737" />
+                <geom class="collision_hip_yaw_left_1" />
+                <geom class="collision_hip_yaw_left_2" />
+                <body name="LINK_KNEE_PITCH_L" pos="-0.03781 -0.0003101 -0.26429">
+                    <inertial pos="-0.0121694 0.0028745 -0.1363783" mass="8.9867919" fullinertia="0.1706709 0.1743251 0.0155028 -0.0002942 -0.0126977 -0.0023399" />
+                    <geom class="visual" type="mesh" mesh="LINK_KNEE_PITCH_L" />
+                    <joint name="J03_KNEE_PITCH_L" pos="0 0 0" axis="0 1 0" range="-0.261667 2.355" actuatorfrcrange="-415 415" damping="1.6" frictionloss="1" armature="0.2427264" />
+                    <geom class="collision_knee_pitch_left" />
+                    <body name="LINK_ANKLE_PITCH_L" pos="-0.0027 -0.0003073 -0.4386">
+                        <inertial pos="-1.35e-05 0.000626 -0.0063597" mass="0.1959471" fullinertia="7.6e-05 9.04e-05 4.32e-05 0 8e-07 0" />
+                        <geom class="visual" type="mesh" mesh="LINK_ANKLE_PITCH_L" />
+                        <joint name="J04_ANKLE_PITCH_L" pos="0 0 0" axis="0 1 0" range="-0.68067 0.68067" actuatorfrcrange="-160 160" damping="1.6" frictionloss="1" armature="0.0354625" />
+                        <body name="LINK_ANKLE_ROLL_L" pos="-0.0010984 0.000626 -0.038">
+                            <inertial pos="0.000235 0.0003142 -0.0252878" mass="1.966396" fullinertia="0.0031303 0.00989859999 0.00997000001 -0.000863589544 0.000889469588 0.000104899997" />
+                            <geom class="visual" type="mesh" mesh="LINK_ANKLE_ROLL_L" />
+                            <joint name="J05_ANKLE_ROLL_L" pos="0 0 0" axis="1 0 0" range="-0.349 0.1745" actuatorfrcrange="-160 160" damping="1.6" frictionloss="1" armature="0.0354625" />
+                            <geom class="collision_ankle_roll_left" />
+                            <body name="LINK_FOOT_L" pos="0.029607 0.001302 -0.0640065">
+                                <inertial pos="0 0 0" mass="0.001" fullinertia="1e-12 1e-12 1e-12 0 0 0" />
+                                <site name="force_sensor_left_foot" />
+                                <site name="torque_sensor_left_foot" />
+                            </body>
+                        </body>
+                    </body>
+                </body>
+            </body>
+        </body>
+    </body>
+    <body name="LINK_HIP_PITCH_R" pos="0 -0.073634 0.0049286">
+        <inertial pos="0.009027 -0.0443441 -0.0955939" mass="3.3334299" fullinertia="0.0069902 0.0082066 0.0042974 4.64e-05 0.0004541 -0.0004799" />
+        <geom class="visual" type="mesh" mesh="LINK_HIP_PITCH_R" />
+        <joint name="J06_HIP_PITCH_R" pos="0 0 0" axis="0 0.965926 0.258819" range="-3.316 2.269" actuatorfrcrange="-415 415" damping="1.6" frictionloss="1" armature="0.2427264" />
+        <body name="LINK_HIP_ROLL_R" pos="0.0005126 -0.045866 -0.109">
+            <inertial pos="0.0431731 -0.0034371 -0.0499355" mass="0.8887822" fullinertia="0.002974 0.0029534 0.0023275 -3.64e-05 -0.000583 -8.86e-05" />
+            <geom class="visual" type="mesh" mesh="LINK_HIP_ROLL_R" />
+            <joint name="J07_HIP_ROLL_R" pos="0 0 0" axis="1 0 0" range="-2.059 1.082" actuatorfrcrange="-370 370" damping="1.6" frictionloss="1" armature="0.14110848" />
+            <geom class="collision_hip_roll_right" />
+            <body name="LINK_HIP_YAW_R" pos="0.0137 0 -0.10421">
+                <inertial pos="-0.0049756 -0.0018226 -0.093164" mass="3.5658205" fullinertia="0.0343658 0.033924 0.0079499 -0.0001156 -0.0028385 -0.0004225" />
+                <geom class="visual" type="mesh" mesh="LINK_HIP_YAW_R" />
+                <joint name="J08_HIP_YAW_R" pos="0 0 0" axis="0 0 1" range="-3.8921 1.42245" actuatorfrcrange="-222 222" damping="1.6" frictionloss="1" armature="0.0448737" />
+                <geom class="collision_hip_yaw_right_1" />
+                <geom class="collision_hip_yaw_right_2" />
+                <body name="LINK_KNEE_PITCH_R" pos="-0.03781 0.0003101 -0.26429">
+                    <inertial pos="-0.0121694 -0.0028745 -0.1363783" mass="8.9867919" fullinertia="0.1706709 0.1743251 0.0155028 0.0002942 -0.0126977 0.0023399" />
+                    <geom class="visual" type="mesh" mesh="LINK_KNEE_PITCH_R" />
+                    <joint name="J09_KNEE_PITCH_R" pos="0 0 0" axis="0 1 0" range="-0.261667 2.355" actuatorfrcrange="-415 415" damping="1.6" frictionloss="1" armature="0.2427264" />
+                    <geom class="collision_knee_pitch_right" />
+                    <body name="LINK_ANKLE_PITCH_R" pos="-0.0027 0.0003073 -0.4386">
+                        <inertial pos="-1.35e-05 -0.000626 -0.0063597" mass="0.1959471" fullinertia="7.6e-05 9.04e-05 4.32e-05 0 8e-07 0" />
+                        <geom class="visual" type="mesh" mesh="LINK_ANKLE_PITCH_R" />
+                        <joint name="J10_ANKLE_PITCH_R" pos="0 0 0" axis="0 1 0" range="-0.68067 0.68067" actuatorfrcrange="-160 160" damping="1.6" frictionloss="1" armature="0.0354625" />
+                        <body name="LINK_ANKLE_ROLL_R" pos="-0.0010984 -0.000626 -0.038">
+                            <inertial pos="0.000235 -0.0003142 -0.0252878" mass="1.966396" fullinertia="0.0031303 0.00989859999 0.00997000001 0.000863589544 0.000889469588 -0.000104899997" />
+                            <geom class="visual" type="mesh" mesh="LINK_ANKLE_ROLL_R" />
+                            <joint name="J11_ANKLE_ROLL_R" pos="0 0 0" axis="1 0 0" range="-0.1745 0.349" actuatorfrcrange="-160 160" damping="1.6" frictionloss="1" armature="0.0354625" />
+                            <geom class="collision_ankle_roll_right" />
+                            <body name="LINK_FOOT_R" pos="0.029607 0.001302 -0.0640065">
+                                <inertial pos="0 0 0" mass="0.001" fullinertia="1e-12 1e-12 1e-12 0 0 0" />
+                                <site name="force_sensor_right_foot" />
+                                <site name="torque_sensor_right_foot" />
+                            </body>
+                        </body>
+                    </body>
+                </body>
+            </body>
+        </body>
+    </body>
+    <body name="LINK_TORSO_YAW" pos="0 0 0.099827">
+        <inertial pos="-0.0102835 -0.0004983 0.2345946" mass="18.7396669" fullinertia="0.2684453 0.2218439 0.1616134 0.0008035 0.0159783 0.0002179" />
+        <geom class="visual" type="mesh" mesh="LINK_TORSO_YAW" />
+        <joint name="J12_TORSO_YAW" pos="0 0 0" axis="0 0 1" range="-2.8086 2.8086" actuatorfrcrange="-222 222" damping="1.6" frictionloss="1" armature="0.0448737" />
+        <geom class="collision_torso_yaw_1" />
+        <geom class="collision_torso_yaw_2" />
+        <body name="LINK_SHOULDER_PITCH_L" pos="-0.010997 0.15859 0.28599">
+            <inertial pos="0.0082029 0.0552751 -0.0114133" mass="1.6267568" fullinertia="0.0030062 0.0017688 0.0024804 -0.0001427 4.43e-05 0.0002832" />
+            <geom class="visual" type="mesh" mesh="LINK_SHOULDER_PITCH_L" />
+            <joint name="J13_SHOULDER_PITCH_L" pos="0 0 0" axis="0 0.996779 0.0801989" range="-3.229 2.443" actuatorfrcrange="-160 160" damping="1.6" frictionloss="1" armature="0.0354625" />
+            <geom class="collision_shoulder_pitch_left" />
+            <body name="LINK_SHOULDER_ROLL_L" pos="7.04e-05 0.066972 -0.015097">
+                <inertial pos="0.0041605 0.0043533 -0.0310776" mass="0.6269057" fullinertia="0.0012407 0.0017044 0.0011432 7.9e-06 -5.62e-05 7.34e-05" />
+                <geom class="visual" type="mesh" mesh="LINK_SHOULDER_ROLL_L" />
+                <joint name="J14_SHOULDER_ROLL_L" pos="0 0 0" axis="1 0 0" range="-0.384 2.487" actuatorfrcrange="-160 160" damping="1.6" frictionloss="1" armature="0.0354625" />
+                <body name="LINK_SHOULDER_YAW_L" pos="-3.64e-05 0.0084413 -0.081589">
+                    <inertial pos="-3.36e-05 0.01037 -0.0892604" mass="2.3589667" fullinertia="0.0111892 0.011467 0.0026612 -2e-05 7.53e-05 0.0011873" />
+                    <geom class="visual" type="mesh" mesh="LINK_SHOULDER_YAW_L" />
+                    <joint name="J15_SHOULDER_YAW_L" pos="0 0 0" axis="0 -0.0714642 0.997443" range="-2.618 2.618" actuatorfrcrange="-160 160" damping="1.6" frictionloss="1" armature="0.0354625" />
+                    <geom class="collision_shoulder_yaw_left" />
+                    <body name="LINK_ELBOW_PITCH_L" pos="0.0018465 0.011153 -0.15202">
+                        <inertial pos="-0.0085298 0.0076097 -0.0754539" mass="1.1366032" fullinertia="0.0031915 0.0030427 0.0012385 -1.45e-05 -6.88e-05 -5.77e-05" />
+                        <geom class="visual" type="mesh" mesh="LINK_ELBOW_PITCH_L" />
+                        <joint name="J16_ELBOW_PITCH_L" pos="0 0 0" axis="0 0.997443 0.0714642" range="-2.295 0.288" actuatorfrcrange="-160 160" damping="1.6" frictionloss="1" armature="0.0354625" />
+                        <geom class="collision_elbow_pitch_left" />
+                        <body name="LINK_ELBOW_YAW_L" pos="-0.0015698 0.0093933 -0.13476">
+                            <inertial pos="0.014527 0.0028337 -0.0648253" mass="0.9132234" fullinertia="0.0022616 0.0024284 0.0007868 -3.69e-05 0.000347 0.0001671" />
+                            <geom class="visual" type="mesh" mesh="LINK_ELBOW_YAW_L" />
+                            <joint name="J17_ELBOW_YAW_L" pos="0 0 0" axis="-0.21644 -0.069771 0.9738" range="-2.618 2.618" actuatorfrcrange="-52 52" damping="1.6" frictionloss="1" armature="0.00671625" />
+                            <geom class="collision_elbow_yaw_left" />
+                            <body name="LINK_WRIST_PITCH_L" pos="0.031694 0.023161 -0.14167">
+                                <inertial pos="-0.0001113 -0.0019431 0.000364" mass="0.0216458" fullinertia="1.7e-06 9e-07 1.8e-06 0 0 0" />
+                                <geom class="visual" type="mesh" mesh="LINK_WRIST_PITCH_L" />
+                                <joint name="J18_WRIST_PITCH_L" pos="0 0 0" axis="0 0.997443 0.0714642" range="-0.524 0.524" actuatorfrcrange="-5 5" damping="1.6" frictionloss="1" armature="0.005" />
+                                <body name="LINK_WRIST_ROLL_L" pos="0.0001472 -0.012448 -0.0008592">
+                                    <inertial pos="0.0089375 -0.0018711 -0.0795711" mass="0.774675" fullinertia="0.0016339 0.0016617 0.0005678 -0.0001032 0.0001799 0.0001523" />
+                                    <geom class="visual" type="mesh" mesh="LINK_WRIST_ROLL_L" />
+                                    <joint name="J19_WRIST_ROLL_L" pos="0 0 0" axis="0.976295 -0.0154669 0.215889" range="-1.047 0.785" actuatorfrcrange="-5 5" damping="1.6" frictionloss="1" armature="0.005" />
+                                    <geom class="collision_wrist_roll_left" />
+                                    <body name="LINK_THUMB_BASE_L" pos="0.038812 0.0005485 -0.098963">
+                                        <inertial pos="0.0068159 -0.0007396 -0.0035923" mass="0.10745" fullinertia="2.83e-05 4.04e-05 3.22e-05 -4e-07 -3.4e-06 -7e-07" />
+                                        <geom class="visual" type="mesh" mesh="LINK_THUMB_BASE_L" />
+                                        <joint name="J20_THUMB_BASE_L" pos="0 0 0" axis="-0.215999 -0.00595577 0.976375" range="-2.007 0" actuatorfrcrange="-1.1 1.1" damping="1.6" frictionloss="0.8" armature="0.0001265" />
+                                        <body name="LINK_THUMB_MID_L" pos="0.032743 3.67e-05 0.0057884">
+                                            <inertial pos="0.0130168 -0.0001792 0.0039452" mass="0.0712778" fullinertia="6.4e-06 1.95e-05 1.88e-05 2e-07 -2.7e-06 1e-07" />
+                                            <geom class="visual" type="mesh" mesh="LINK_THUMB_MID_L" />
+                                            <joint name="J21_THUMB_MID_L" pos="0 0 0" axis="0.013816 0.999863 0.00915562" range="0 1.5708" actuatorfrcrange="-1.1 1.1" damping="1.6" frictionloss="0.8" armature="0.0001265" />
+                                            <body name="LINK_THUMB_TIP_L" pos="0.028306 -0.0009551 0.006256">
+                                                <inertial pos="0.0189056 -3.2e-05 0.0047423" mass="0.0353745" fullinertia="4.2e-06 1.06e-05 1.18e-05 2e-07 -1.2e-06 0" />
+                                                <geom class="visual" type="mesh" mesh="LINK_THUMB_TIP_L" />
+                                                <joint name="J22_THUMB_TIP_L" pos="0 0 0" axis="0.013816 0.999863 0.00915562" range="0 1.5708" actuatorfrcrange="-1.1 1.1" damping="1.6" frictionloss="0.8" armature="0.0001265" />
+                                            </body>
+                                        </body>
+                                    </body>
+                                    <body name="LINK_INDEX_BASE_L" pos="0.049076 0.0008487 -0.14725">
+                                        <inertial pos="0.0050174 0.0014187 -0.0237035" mass="0.0631484" fullinertia="2.09e-05 2.32e-05 8.9e-06 1e-07 2.7e-06 -1e-07" />
+                                        <geom class="visual" type="mesh" mesh="LINK_INDEX_BASE_L" />
+                                        <joint name="J23_INDEX_BASE_L" pos="0 0 0" axis="0.976295 -0.0154669 0.215889" range="-1.6929 0" actuatorfrcrange="-1.1 1.1" damping="1.6" frictionloss="0.8" armature="0.0001265" />
+                                        <body name="LINK_INDEX_TIP_L" pos="0.0088738 0.0002345 -0.039003">
+                                            <inertial pos="0.0022183 0.0024825 -0.0161371" mass="0.0322173" fullinertia="8.1e-06 9.6e-06 3.8e-06 -1e-07 6e-07 5e-07" />
+                                            <geom class="visual" type="mesh" mesh="LINK_INDEX_TIP_L" />
+                                            <joint name="J24_INDEX_TIP_L" pos="0 0 0" axis="0.976295 -0.0154669 0.215889" range="-1.85 0" actuatorfrcrange="-1.1 1.1" damping="1.6" frictionloss="0.8" armature="0.0001265" />
+                                        </body>
+                                    </body>
+                                    <body name="LINK_MIDDLE_BASE_L" pos="0.016052 0.0013719 -0.15455">
+                                        <inertial pos="0.0038713 0.0014368 -0.0239569" mass="0.0631484" fullinertia="2.09e-05 2.32e-05 8.9e-06 1e-07 2.7e-06 -1e-07" />
+                                        <geom class="visual" type="mesh" mesh="LINK_MIDDLE_BASE_L" />
+                                        <joint name="J25_MIDDLE_BASE_L" pos="0 0 0" axis="0.976295 -0.0154669 0.215889" range="-1.6929 0" actuatorfrcrange="-1.1 1.1" damping="1.6" frictionloss="0.8" armature="0.0001265" />
+                                        <body name="LINK_MIDDLE_TIP_L" pos="0.0079239 0.0002496 -0.039213">
+                                            <inertial pos="0.0044773 0.0024979 -0.0155822" mass="0.0322698" fullinertia="7.8e-06 9.7e-06 4.2e-06 -1e-07 1.4e-06 5e-07" />
+                                            <geom class="visual" type="mesh" mesh="LINK_MIDDLE_TIP_L" />
+                                            <joint name="J26_MIDDLE_TIP_L" pos="0 0 0" axis="0.976295 -0.0154669 0.215889" range="-1.85 0" actuatorfrcrange="-1.1 1.1" damping="1.6" frictionloss="0.8" armature="0.0001265" />
+                                        </body>
+                                    </body>
+                                </body>
+                            </body>
+                        </body>
+                    </body>
+                </body>
+            </body>
+        </body>
+        <body name="LINK_SHOULDER_PITCH_R" pos="-0.010997 -0.15859 0.28599">
+            <inertial pos="0.0082029 -0.0552751 -0.0114133" mass="1.6267568" fullinertia="0.0030062 0.0017688 0.0024804 0.0001427 4.43e-05 -0.0002832" />
+            <geom class="visual" type="mesh" mesh="LINK_SHOULDER_PITCH_R" />
+            <joint name="J27_SHOULDER_PITCH_R" pos="0 0 0" axis="0 0.996779 -0.0801989" range="-3.229 2.443" actuatorfrcrange="-160 160" damping="1.6" frictionloss="1" armature="0.0354625" />
+            <geom class="collision_shoulder_pitch_right" />
+            <body name="LINK_SHOULDER_ROLL_R" pos="7.04e-05 -0.066972 -0.015097">
+                <inertial pos="0.0041605 -0.0043533 -0.0310776" mass="0.6269057" fullinertia="0.0012407 0.0017044 0.0011432 -7.9e-06 -5.62e-05 -7.34e-05" />
+                <geom class="visual" type="mesh" mesh="LINK_SHOULDER_ROLL_R" />
+                <joint name="J28_SHOULDER_ROLL_R" pos="0 0 0" axis="1 0 0" range="-2.487 0.384" actuatorfrcrange="-160 160" damping="1.6" frictionloss="1" armature="0.0354625" />
+                <body name="LINK_SHOULDER_YAW_R" pos="-3.64e-05 -0.0084413 -0.081589">
+                    <inertial pos="-3.36e-05 -0.01037 -0.0892604" mass="2.3589667" fullinertia="0.0111892 0.011467 0.0026612 2e-05 7.53e-05 -0.0011873" />
+                    <geom class="visual" type="mesh" mesh="LINK_SHOULDER_YAW_R" />
+                    <joint name="J29_SHOULDER_YAW_R" pos="0 0 0" axis="0 0.0714642 0.997443" range="-2.618 2.618" actuatorfrcrange="-160 160" damping="1.6" frictionloss="1" armature="0.0354625" />
+                    <geom class="collision_shoulder_yaw_right" />
+                    <body name="LINK_ELBOW_PITCH_R" pos="0.0018465 -0.011153 -0.15202">
+                        <inertial pos="-0.0085298 -0.0076097 -0.0754539" mass="1.1366032" fullinertia="0.0031915 0.0030427 0.0012385 1.45e-05 -6.88e-05 5.77e-05" />
+                        <geom class="visual" type="mesh" mesh="LINK_ELBOW_PITCH_R" />
+                        <joint name="J30_ELBOW_PITCH_R" pos="0 0 0" axis="0 0.997443 -0.0714642" range="-2.295 0.288" actuatorfrcrange="-160 160" damping="1.6" frictionloss="1" armature="0.0354625" />
+                        <geom class="collision_elbow_pitch_right" />
+                        <body name="LINK_ELBOW_YAW_R" pos="-0.0015698 -0.0093933 -0.13476">
+                            <inertial pos="0.014527 -0.0028337 -0.0648253" mass="0.9132234" fullinertia="0.0022616 0.0024284 0.0007868 3.69e-05 0.000347 -0.0001671" />
+                            <geom class="visual" type="mesh" mesh="LINK_ELBOW_YAW_R" />
+                            <joint name="J31_ELBOW_YAW_R" pos="0 0 0" axis="-0.21644 0.069771 0.9738" range="-2.618 2.618" actuatorfrcrange="-52 52" damping="1.6" frictionloss="1" armature="0.00671625" />
+                            <geom class="collision_elbow_yaw_right" />
+                            <body name="LINK_WRIST_PITCH_R" pos="0.031694 -0.023161 -0.14167">
+                                <inertial pos="-0.0001113 0.0019431 0.000364" mass="0.0216458" fullinertia="1.7e-06 9e-07 1.8e-06 0 0 0" />
+                                <geom class="visual" type="mesh" mesh="LINK_WRIST_PITCH_R" />
+                                <joint name="J32_WRIST_PITCH_R" pos="0 0 0" axis="0 0.997443 -0.0714642" range="-0.524 0.524" actuatorfrcrange="-5 5" damping="1.6" frictionloss="1" armature="0.005" />
+                                <body name="LINK_WRIST_ROLL_R" pos="0.0001472 0.012448 -0.0008592">
+                                    <inertial pos="0.0089375 0.0018711 -0.0795711" mass="0.774675" fullinertia="0.0016339 0.0016617 0.0005678 0.0001032 0.0001799 -0.0001523" />
+                                    <geom class="visual" type="mesh" mesh="LINK_WRIST_ROLL_R" />
+                                    <joint name="J33_WRIST_ROLL_R" pos="0 0 0" axis="0.976295 0.0154669 0.215889" range="-0.785 1.047" actuatorfrcrange="-5 5" damping="1.6" frictionloss="1" armature="0.005" />
+                                    <geom class="collision_wrist_roll_right" />
+                                    <body name="LINK_THUMB_BASE_R" pos="0.038812 -0.0005485 -0.098963">
+                                        <inertial pos="0.0068159 0.0007396 -0.0035923" mass="0.10745" fullinertia="2.83e-05 4.04e-05 3.22e-05 4e-07 -3.4e-06 7e-07" />
+                                        <geom class="visual" type="mesh" mesh="LINK_THUMB_BASE_R" />
+                                        <joint name="J34_THUMB_BASE_R" pos="0 0 0" axis="-0.215999 0.00595577 0.976375" range="0 2.007" actuatorfrcrange="-1.1 1.1" damping="1.6" frictionloss="0.8" armature="0.0001265" />
+                                        <body name="LINK_THUMB_MID_R" pos="0.032743 -3.67e-05 0.0057884">
+                                            <inertial pos="0.0130168 0.0001792 0.0039452" mass="0.0712778" fullinertia="6.4e-06 1.95e-05 1.88e-05 -2e-07 -2.7e-06 -1e-07" />
+                                            <geom class="visual" type="mesh" mesh="LINK_THUMB_MID_R" />
+                                            <joint name="J35_THUMB_MID_R" pos="0 0 0" axis="-0.013816 0.999863 -0.00915562" range="0 1.5708" actuatorfrcrange="-1.1 1.1" damping="1.6" frictionloss="0.8" armature="0.0001265" />
+                                            <body name="LINK_THUMB_TIP_R" pos="0.028306 0.0009551 0.006256">
+                                                <inertial pos="0.0189056 3.2e-05 0.0047423" mass="0.0353745" fullinertia="4.2e-06 1.06e-05 1.18e-05 -2e-07 -1.2e-06 0" />
+                                                <geom class="visual" type="mesh" mesh="LINK_THUMB_TIP_R" />
+                                                <joint name="J36_THUMB_TIP_R" pos="0 0 0" axis="-0.013816 0.999863 -0.00915562" range="0 1.5708" actuatorfrcrange="-1.1 1.1" damping="1.6" frictionloss="0.8" armature="0.0001265" />
+                                            </body>
+                                        </body>
+                                    </body>
+                                    <body name="LINK_INDEX_BASE_R" pos="0.049076 -0.0008487 -0.14725">
+                                        <inertial pos="0.0050174 -0.0014187 -0.0237035" mass="0.0631484" fullinertia="2.09e-05 2.32e-05 8.9e-06 -1e-07 2.7e-06 1e-07" />
+                                        <geom class="visual" type="mesh" mesh="LINK_INDEX_BASE_R" />
+                                        <joint name="J37_INDEX_BASE_R" pos="0 0 0" axis="0.976295 0.0154669 0.215889" range="0 1.6929" actuatorfrcrange="-1.1 1.1" damping="1.6" frictionloss="0.8" armature="0.0001265" />
+                                        <body name="LINK_INDEX_TIP_R" pos="0.0088738 -0.0002345 -0.039003">
+                                            <inertial pos="0.0022183 -0.0024825 -0.0161371" mass="0.0322173" fullinertia="8.1e-06 9.6e-06 3.8e-06 1e-07 6e-07 -5e-07" />
+                                            <geom class="visual" type="mesh" mesh="LINK_INDEX_TIP_R" />
+                                            <joint name="J38_INDEX_TIP_R" pos="0 0 0" axis="0.976295 0.0154669 0.215889" range="0 1.85" actuatorfrcrange="-1.1 1.1" damping="1.6" frictionloss="0.8" armature="0.0001265" />
+                                        </body>
+                                    </body>
+                                    <body name="LINK_MIDDLE_BASE_R" pos="0.016052 -0.0013719 -0.15455">
+                                        <inertial pos="0.0038713 -0.0014368 -0.0239569" mass="0.0631484" fullinertia="2.09e-05 2.32e-05 8.9e-06 -1e-07 2.7e-06 1e-07" />
+                                        <geom class="visual" type="mesh" mesh="LINK_MIDDLE_BASE_R" />
+                                        <joint name="J39_MIDDLE_BASE_R" pos="0 0 0" axis="0.976295 0.0154669 0.215889" range="0 1.6929" actuatorfrcrange="-1.1 1.1" damping="1.6" frictionloss="0.8" armature="0.0001265" />
+                                        <body name="LINK_MIDDLE_TIP_R" pos="0.0079239 -0.0002496 -0.039213">
+                                            <inertial pos="0.0044773 -0.0024979 -0.0155822" mass="0.0322698" fullinertia="7.8e-06 9.7e-06 4.2e-06 1e-07 1.4e-06 -5e-07" />
+                                            <geom class="visual" type="mesh" mesh="LINK_MIDDLE_TIP_R" />
+                                            <joint name="J40_MIDDLE_TIP_R" pos="0 0 0" axis="0.976295 0.0154669 0.215889" range="0 1.85" actuatorfrcrange="-1.1 1.1" damping="1.6" frictionloss="0.8" armature="0.0001265" />
+                                        </body>
+                                    </body>
+                                </body>
+                            </body>
+                        </body>
+                    </body>
+                </body>
+            </body>
+        </body>
+        <body name="LINK_HEAD_PITCH" pos="-0.011297 -0.0001018 0.3935">
+            <inertial pos="0.001464 0.0001861 0.0647889" mass="0.9609658" fullinertia="0.0015169 0.0016542 0.001458 -1e-07 0.0001181 -1.52e-05" />
+            <geom class="visual" type="mesh" mesh="LINK_HEAD_PITCH" />
+            <joint name="J41_HEAD_PITCH" pos="0 0 0" axis="0 1 0" range="-0.523 0.523" actuatorfrcrange="-52 52" damping="1.6" frictionloss="1" armature="0.00671625" />
+            <body name="LINK_HEAD_YAW" pos="0 0.0001018 0.10254">
+                <inertial pos="0.0199911 2.1e-06 0.0445437" mass="0.8593277" fullinertia="0.0024747 0.0033294 0.0032577 -3.6e-06 0.0002835 1.2e-06" />
+                <geom class="visual" type="mesh" mesh="LINK_HEAD_YAW" />
+                <joint name="J42_HEAD_YAW" pos="0 0 0" axis="0 0 1" range="-1.222 1.222" actuatorfrcrange="-52 52" damping="1.6" frictionloss="1" armature="0.00671625" />
+                <geom class="collision_head_yaw" />
+            </body>
+        </body>
+    </body>
+</mujoco>

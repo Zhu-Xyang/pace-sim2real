@@ -85,3 +85,6 @@ tests/
 # g1 asset
 **/assets_robot/g1/*
 **/assets_robot/g1_description/*
+
+# real test report
+**/docs/reports/s800_real/*

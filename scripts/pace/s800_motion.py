@@ -6,7 +6,7 @@ import torch
 from s800_clearance import with_midpoints
 
 
-def nominal_motion(joint_names):
+def nominal_motion(joint_names, *, hold_arms_outward=False):
     # Explicit centers preserve the former bias*direction*scale pose. Changing an
     # amplitude below no longer moves the center. Encoder bias is a separate value.
     #
@@ -14,17 +14,22 @@ def nominal_motion(joint_names):
     #     在 serial_s800_lock_wrist_torso.urdf 里锁定，见 docs/s800_single_part.md §8）。
     #     保留是因为本函数是「按名字查表」的通用映射，不跟随 joint_order 增删；
     #     多余的 key 不会被查到，也就不会是错的。若将来解锁，这里原值即可复用。
-    centers = {"HIP_PITCH": 0., "HIP_ROLL": .045, "HIP_YAW": 0., "KNEE_PITCH": .523,
-               "ANKLE_PITCH": 0., "ANKLE_ROLL": -.009135,
+    # Candidate fixture preview: chirp about a forward/outward leg pose,
+    # one-third original arm amplitude, with an optional abducted hold pose for leg collection.
+    # Use --trajectory_profile legacy (no center scaling). Not SDK-YAML-aligned.
+    # Offline geometry only: fixture dimensions, entry path and actual tracking
+    # are not verified. Negative hip-pitch amplitude coordinates forward flexion
+    # with outward hip roll on the same chirp half-cycle.
+    centers = {"HIP_PITCH": -.55, "HIP_ROLL": .16, "HIP_YAW": 0., "KNEE_PITCH": .10,
+               "ANKLE_PITCH": .10, "ANKLE_ROLL": 0.,
                "SHOULDER_PITCH": 0., "SHOULDER_ROLL": .3156, "SHOULDER_YAW": 0.,
                "ELBOW_PITCH": -.3012, "ELBOW_YAW": 0., "WRIST_PITCH": 0., "WRIST_ROLL": -.00655}
-    # Reduce lateral/twisting excitation while retaining the original center pose.
-    # At scale_factor=0.8: hip roll/yaw and ankle roll amplitudes are .048/.08/.032 rad.
-    # Command geometry checked offline; actual tracking still needs a new recording.
-    amplitudes = {"HIP_PITCH": .5, "HIP_ROLL": .06, "HIP_YAW": .10, "KNEE_PITCH": .5,
-                  "ANKLE_PITCH": .272, "ANKLE_ROLL": .04,
-                  "SHOULDER_PITCH": .35, "SHOULDER_ROLL": .3, "SHOULDER_YAW": .25,
-                  "ELBOW_PITCH": .3, "ELBOW_YAW": .15, "WRIST_PITCH": .05, "WRIST_ROLL": .05}
+    amplitudes = {"HIP_PITCH": -.15, "HIP_ROLL": .10, "HIP_YAW": .02, "KNEE_PITCH": .04,
+                  "ANKLE_PITCH": .04, "ANKLE_ROLL": .02,
+                  "SHOULDER_PITCH": .35 / 3, "SHOULDER_ROLL": .10, "SHOULDER_YAW": .25 / 3,
+                  "ELBOW_PITCH": .10, "ELBOW_YAW": .05, "WRIST_PITCH": .05 / 3, "WRIST_ROLL": .05 / 3}
+    if hold_arms_outward:
+        centers.update(SHOULDER_ROLL=.80, ELBOW_PITCH=-.30, WRIST_ROLL=0.)
     mirrored = {"HIP_ROLL", "HIP_YAW", "ANKLE_ROLL", "SHOULDER_ROLL", "SHOULDER_YAW", "ELBOW_YAW", "WRIST_ROLL"}
     center, amplitude = [], []
     for name in joint_names:
@@ -39,7 +44,7 @@ def nominal_motion(joint_names):
     return torch.tensor(center), torch.tensor(amplitude)
 
 
-def scaled_nominal_motion(joint_names, selected, factor):
+def scaled_nominal_motion(joint_names, selected, factor, *, hold_arms_outward=False):
     """Restore (chirp + original_bias) * direction * (original_scale * factor).
 
     Scale both the center and amplitude for excited joints only. This preserves
@@ -48,7 +53,7 @@ def scaled_nominal_motion(joint_names, selected, factor):
     """
     if not np.isfinite(factor) or not 0 < factor <= 1:
         raise ValueError("scale_factor must be finite and in (0, 1]")
-    center, amplitude = nominal_motion(joint_names)
+    center, amplitude = nominal_motion(joint_names, hold_arms_outward=hold_arms_outward)
     center[selected] *= factor
     amplitude[selected] *= factor
     return center, amplitude

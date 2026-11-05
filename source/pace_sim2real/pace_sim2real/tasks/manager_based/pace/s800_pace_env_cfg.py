@@ -279,7 +279,8 @@ class S800PaceSceneCfg(PaceSim2realSceneCfg):
             # 22 自由度版本（锁定 J12 + 4 个 WRIST）。由
             # scripts/lock_urdf_joints.py + IsaacLab 的 convert_urdf.py 生成，见 docs/s800_single_part.md §8。
             # 旧的 27 自由度资产仍在 assets_robot/engineai_S800/usd/serial_s800.usda，未改动，可随时切回。
-            usd_path="/home/samsung/Humanoid/pace-sim2real/assets_robot/engineai_S800/usd_locked/serial_s800_lock_wrist_torso.usda",
+            # usd_path="/home/samsung/Humanoid/pace-sim2real/assets_robot/engineai_S800/usd_locked/serial_s800_lock_wrist_torso.usda", # 老版s800
+            usd_path="/home/samsung/Humanoid/pace-sim2real/assets_robot/robot_s/usd_locked/serial_robot_s_pace_22dof.usda", # 新版s800 urdf
             # usd_path="/home/samsung/Humanoid/pace-sim2real/assets_robot/s800/usd_merge_joints/serial_robot_s_42dof/serial_robot_s_42dof.usda",
             # usd_path="/home/samsung/Humanoid/pace-sim2real/assets_robot/s800/usd_no_inertia/serial_robot_s_42dof/serial_robot_s_42dof.usda",
             rigid_props=sim_utils.RigidBodyPropertiesCfg(

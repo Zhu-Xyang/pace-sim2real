@@ -1,0 +1,132 @@
+<mujoco model="robots">
+    <compiler angle="radian" discardvisual="false" autolimits="true" eulerseq="zyx"/>
+    <option timestep="0.002" integrator="implicitfast" tolerance="1e-10"/>
+    <visual>
+      <rgba contactpoint="0.1 0.8 0.2 1" contactforce="0.7 0.5 0.4 1"/>
+      <scale forcewidth="0.04" contactwidth="0.15" contactheight="0.01"/>
+    </visual>
+    <default>
+        <default class="biped">
+            <default class="collision">
+                <geom group="3" contype="1" conaffinity="1" friction="1.0 0.005 0.0001" rgba="0.804 0.361 0.031 0.5" />
+
+                <default class="collision_base">
+                    <geom type="sphere" size="0.09" pos="0 0 0.01" />
+                </default>
+
+                <default class="collision_hip_roll_left">
+                    <geom type="sphere" size="0.07" pos="0 0 0" />
+                </default>
+
+                <default class="collision_hip_yaw_left_1">
+                    <geom type="box" size="0.07 0.07 0.095" pos="0 0 -0.08" />
+                </default>
+
+                <default class="collision_hip_yaw_left_2">
+                    <geom type="sphere" size="0.075" pos="-0.042798 0 -0.265529" />
+                </default>
+
+                <default class="collision_knee_pitch_left">
+                    <geom type="box" size="0.065 0.06 0.15" pos="-0.02 0 -0.27" />
+                </default>
+
+                <default class="collision_ankle_roll_left">
+                    <geom type="box" size="0.139885 0.051904 0.0340065" pos="0.029607 0.001302 -0.03" />
+                </default>
+
+                <default class="collision_hip_roll_right">
+                    <geom type="sphere" size="0.07" pos="0 0 0" />
+                </default>
+
+                <default class="collision_hip_yaw_right_1">
+                    <geom type="box" size="0.07 0.07 0.095" pos="0 0 -0.08" />
+                </default>
+
+                <default class="collision_hip_yaw_right_2">
+                    <geom type="sphere" size="0.075" pos="-0.042798 0 -0.265529" />
+                </default>
+
+                <default class="collision_knee_pitch_right">
+                    <geom type="box" size="0.065 0.06 0.15" pos="-0.02 0 -0.27" />
+                </default>
+
+                <default class="collision_ankle_roll_right">
+                    <geom type="box" size="0.139885 0.051904 0.0340065" pos="0.029607 0.001302 -0.03" />
+                </default>
+
+                <default class="collision_torso_yaw_1">
+                    <geom type="box" size="0.12 0.15 0.085" pos="-0.01 0 0.28" />
+                </default>
+
+                <default class="collision_torso_yaw_2">
+                    <geom type="box" size="0.12 0.12 0.085" pos="0 0 0.1" />
+                </default>
+
+                <default class="collision_shoulder_pitch_left">
+                    <geom type="sphere" size="0.06" pos="0 0.073533 -0.01008" />
+                </default>
+
+                <default class="collision_shoulder_yaw_left">
+                    <geom type="box" size="0.045 0.05 0.045" pos="0 0 -0.03" quat="0.999391 0.0348995 0 0" />
+                </default>
+
+                <default class="collision_elbow_pitch_left">
+                    <geom type="sphere" size="0.06" pos="0 0 -0.01" />
+                </default>
+
+                <default class="collision_elbow_yaw_left">
+                    <geom type="box" size="0.04 0.045 0.095" pos="0.015 0 -0.06" quat="0.992206 0.0259818 -0.121828 0.00319017" />
+                </default>
+
+                <default class="collision_wrist_roll_left">
+                    <geom type="sphere" size="0.07" pos="0.03 0 -0.12" />
+                </default>
+
+                <default class="collision_shoulder_pitch_right">
+                    <geom type="sphere" size="0.06" pos="0 -0.073533 -0.01008" />
+                </default>
+
+                <default class="collision_shoulder_yaw_right">
+                    <geom type="box" size="0.045 0.05 0.045" pos="0 0 -0.03" quat="0.999391 -0.0348995 0 0" />
+                </default>
+
+                <default class="collision_elbow_pitch_right">
+                    <geom type="sphere" size="0.06" pos="0 0 -0.01" />
+                </default>
+
+                <default class="collision_elbow_yaw_right">
+                    <geom type="box" size="0.04 0.045 0.095" pos="0.015 0 -0.06" quat="0.992206 -0.0259818 -0.121828 -0.00319017" />
+                </default>
+
+                <default class="collision_wrist_roll_right">
+                    <geom type="sphere" size="0.07" pos="0.03 0 -0.12" />
+                </default>
+
+                <default class="collision_head_yaw">
+                    <geom type="sphere" size="0.11" pos="0.02 0 0.03" />
+                </default>
+            </default>
+            <default class="visual">
+                <geom contype="0" conaffinity="0" group="2" rgba="0.79 0.82 0.93 1" />
+            </default>
+            <default class="joint">
+                <joint damping="0.6" frictionloss="0.8" />
+            </default>
+        </default>
+    </default>
+    <include file="assets.xml" />
+    <worldbody>
+        <light name="spotlight" mode="targetbodycom" target="LINK_BASE" pos="0 -1 2" />
+        <body name="LINK_BASE" pos="0 0 1.1">
+            <inertial pos="-0.0003478 3.48e-05 0.0353261" mass="9.6223174" fullinertia="0.0528337 0.0330315 0.0329312 -0.00027 -0.0007041 -2.82e-05" />
+            <geom class="collision_base" />
+            <geom class="visual" type="mesh" mesh="LINK_BASE" />
+            <site name="base" pos="0 0 0" />
+            <site name="imu" pos="0.0019 0 -0.05707" />
+            <freejoint/>
+            <include file="serial_links.xml" />
+        </body>
+    </worldbody>
+    <include file="serial_actuators.xml" />
+    <include file="serial_sensors.xml" />
+</mujoco>

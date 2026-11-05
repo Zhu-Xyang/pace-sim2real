@@ -262,11 +262,12 @@ def main():
 
     from s800_motion import nominal_motion, scaled_nominal_motion, choose_leg_motion
     from s800_clearance import LegClearance, with_midpoints
-    center, amplitude = nominal_motion(joint_order)
+    center, amplitude = nominal_motion(joint_order, hold_arms_outward=args_cli.group == "legs")
     scale_factor = None
     if args_cli.trajectory_profile == "scaled_legacy" and not args_cli.trajectory_plan:
         scale_factor = args_cli.scale_factor if args_cli.scale_factor is not None else (.8 if args_cli.group in ("legs", "all") else 1.)
-        center, amplitude = scaled_nominal_motion(joint_order, selected, scale_factor)
+        center, amplitude = scaled_nominal_motion(
+            joint_order, selected, scale_factor, hold_arms_outward=args_cli.group == "legs")
         print(f"[trajectory] original normalized bias/direction, scale factor={scale_factor}; no collision-free guarantee", flush=True)
     # Compute the normalized waveform on the actual simulation device first.
     t, wave = group_chirp(1 / sample_rate, duration, args_cli.rest, args_cli.ramp,
