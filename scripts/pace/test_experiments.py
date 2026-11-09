@@ -12,12 +12,30 @@ import torch
 import numpy as np
 
 from experiment_utils import (build_joint_groups, select_groups, group_chirp,
-                              freeze_unfitted_truth, validate_recording, recording_name)
+                              freeze_unfitted_truth, validate_recording, recording_name,
+                              expand_fit_bounds)
 
 ROOT = Path(__file__).resolve().parents[2]
 
 
 class ExperimentTests(unittest.TestCase):
+    def test_expanded_bounds_preserve_frozen_joints_delay_and_original(self):
+        # Two joints: fit only the second one. Check complete old domain is retained.
+        bounds = torch.tensor([[.05, .5], [.005, .15], [0., 3.], [0., 1.],
+                               [0., 4.15], [0., 1.6], [-.1, .1], [-.1, .1], [0., 10.]])
+        original = bounds.clone()
+        result = expand_fit_bounds(bounds, [1], 2.)
+        torch.testing.assert_close(result[[1, 3, 5, 7]],
+                                   torch.tensor([[.0025, .3], [0., 2.], [0., 3.2], [-.2, .2]]))
+        torch.testing.assert_close(result[[0, 2, 4, 6, 8]], bounds[[0, 2, 4, 6, 8]])
+        torch.testing.assert_close(bounds, original)
+        self.assertTrue(torch.all(result[:, 0] <= bounds[:, 0]))
+        self.assertTrue(torch.all(result[:, 1] >= bounds[:, 1]))
+        torch.testing.assert_close(expand_fit_bounds(bounds, [1], 1.), bounds)
+        for invalid in (.5, 0., float('nan'), float('inf')):
+            with self.assertRaises(ValueError):
+                expand_fit_bounds(bounds, [1], invalid)
+
     def test_plot_table_uses_snapshot_truth_instead_of_manual_constants(self):
         import csv
         path = ROOT / "scripts/pace/plot_trajectory.py"
@@ -67,6 +85,75 @@ class ExperimentTests(unittest.TestCase):
         rotated = rotation_rpy([0., 0., np.pi/4])[None]
         gap = box_gap(np.zeros((1, 3)), eye, half, np.array([[4., 0., 0.]]), rotated, half)
         self.assertAlmostEqual(float(gap[0]), 3.-np.sqrt(2))
+
+    def test_fixture_spec_and_contact_summary(self):
+        from s800_fixture import (load_fixture_spec, default_fixture_path, part_world_pose,
+                                  quat_from_rpy, summarize_contact, validate_fixture_spec,
+                                  write_contact_csv, fixture_joint_limit_violation)
+        spec = load_fixture_spec(default_fixture_path())
+        self.assertTrue(spec["frame"].startswith("robot_base"))
+        names = [part["name"] for part in spec["parts"]]
+        self.assertEqual(len(names), len(set(names)))
+        self.assertTrue(all(part["shape"] in ("box", "cylinder") for part in spec["parts"]))
+        parts_by_name = {part["name"]: part for part in spec["parts"]}
+        self.assertTrue(parts_by_name["base_center"]["collision"])
+        self.assertTrue(parts_by_name["base_rear"]["collision"])
+        self.assertTrue(parts_by_name["column"]["collision"])
+        # Base is entered relative to the measured pelvis frame (base at z=1.076).
+        self.assertAlmostEqual(part_world_pose(spec["parts"][0], (0., 0., 1.076))[0][2], .095)
+        np.testing.assert_allclose(quat_from_rpy([0., 0., np.pi / 2]),
+                                   [np.sqrt(.5), 0., 0., np.sqrt(.5)], atol=1e-12)
+        np.testing.assert_allclose(
+            part_world_pose({"center": [1., 0., 0.], "rpy": [0., 0., 0.]}, (0., 0., 0.),
+                            quat_from_rpy([0., 0., np.pi / 2]))[0],
+            [0., 1., 0.], atol=1e-12)
+        leg_names = ["J00_HIP_PITCH_L", "J01_HIP_ROLL_L",
+                     "J06_HIP_PITCH_R", "J07_HIP_ROLL_R"]
+        q = np.zeros((2, 4))
+        self.assertTrue(fixture_joint_limit_violation(q, leg_names)["passed"])
+        q[0, 0] = .01  # positive/backward hip pitch is blocked
+        self.assertFalse(fixture_joint_limit_violation(q, leg_names)["passed"])
+        q[0, 0] = 0.
+        q[0, 1] = -.01  # left hip roll inward
+        self.assertFalse(fixture_joint_limit_violation(q, leg_names)["passed"])
+        q[0, 1] = 0.
+        q[0, 3] = .01  # right hip roll inward
+        self.assertFalse(fixture_joint_limit_violation(q, leg_names)["passed"])
+        q[0, 3] = 0.
+        q[1] = [-.1, .1, -.1, -.1]  # forward/outward only
+        self.assertTrue(fixture_joint_limit_violation(q, leg_names)["passed"])
+        q[0] = [.01, -.01, 0., 0.]
+        self.assertTrue(fixture_joint_limit_violation(q, leg_names, margin=.02)["passed"])
+        for bad in ({"parts": []},
+                    {"parts": [{"name": "a", "shape": "box", "size": [1., 2.],
+                                "center": [0., 0., 0.]}]},
+                    {"parts": [{"name": "a", "shape": "nope", "center": [0., 0., 0.]}]},
+                    {"parts": [{"name": "a", "shape": "box", "size": [1., -1., 1.],
+                                "center": [0., 0., 0.]}]},
+                    {"parts": [{"name": "a", "shape": "box", "size": [1., 1., 1.],
+                                "center": [0., 0., 0.], "collision": "yes"}]}):
+            with self.subTest(bad=bad), self.assertRaises(ValueError):
+                validate_fixture_spec(bad)
+        force = np.zeros((5, 3))
+        force[2, 1], force[3, 1], force[4, 0] = 2., 3., 1.5
+        summary = summarize_contact(force, np.arange(5) * .005, ["base", "thigh", "shank"], 1.)
+        self.assertTrue(summary["contact_detected"])
+        self.assertAlmostEqual(summary["first_contact_time_s"], .010)
+        self.assertEqual(summary["first_contact_body"], "thigh")
+        self.assertAlmostEqual(summary["max_force_N"], 3.)
+        self.assertAlmostEqual(summary["contact_duration_s"], .015)
+        self.assertEqual(summary["peak_by_body_N"]["thigh"], 3.)
+        base_only = np.zeros((5, 3))
+        base_only[:, 0] = 100.
+        ignored = summarize_contact(base_only, np.arange(5) * .005,
+                                    ["base", "thigh", "shank"], 1., ignore_bodies=("base",))
+        self.assertFalse(ignored["contact_detected"])
+        self.assertEqual(ignored["max_force_N"], 0.)
+        self.assertEqual(ignored["ignored_bodies"], ["base"])
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "contact.csv"
+            write_contact_csv(path, np.arange(5) * .005, force, ["base", "thigh", "shank"])
+            self.assertEqual(len(path.read_text().splitlines()), 6)
 
     def test_leg_plan_preserves_center_and_rejects_crossed_legacy_sweep(self):
         from s800_clearance import LegClearance, with_midpoints
@@ -206,6 +293,11 @@ class ExperimentTests(unittest.TestCase):
         data["experiment"]["actual_clearance"] = {"passed": False}
         with self.assertRaisesRegex(ValueError, "clearance"):
             validate_recording(data, names, [0], current)
+        data["experiment"].pop("actual_clearance")
+        data["experiment"]["fixture"] = {"contact_detected": True}
+        with self.assertRaisesRegex(ValueError, "fixture"):
+            validate_recording(data, names, [0], current)
+        validate_recording(data, names, [0], current, allow_fixture_contact=True)
 
     def test_optimizer_loss_mask_freezing_and_checkpoint_pair(self):
         path = ROOT / "source/pace_sim2real/pace_sim2real/optim/cma_es.py"

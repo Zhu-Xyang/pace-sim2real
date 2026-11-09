@@ -37,6 +37,15 @@ UNIFORM_BOUNDS = {
     "friction": (0.0,   0.50),
 }
 
+# 真机测量（2026-11-06）：pelvis 底面距地约 1.05 m；用户随后要求再降低 5 cm
+# 以接近真实实验场景，因此这里取 1.00 m。base link 视觉/碰撞网格最低点在 base
+# origin 下方 0.076 m，所以 base origin = 1.00 + 0.076 = 1.076 m。
+# 脚底实测离地约 0.03 m，但当前 URDF 的 ankle-roll 网格只到 base origin 下方
+# 约 1.014 m（零位），比实测鞋底高约 0.08 m；地面间隙检查按 URDF 会更保守。
+S800_PELVIS_BOTTOM_M = 1.00
+S800_BASE_LINK_BOTTOM_OFFSET_M = 0.076
+S800_BASE_HEIGHT_M = S800_PELVIS_BOTTOM_M + S800_BASE_LINK_BOTTOM_OFFSET_M
+
 S800_ACTUATOR_CFG = PaceDCMotorCfg(
     joint_names_expr=[".*"],
     saturation_effort=415.0, # 电机峰值扭矩 from XML
@@ -298,7 +307,8 @@ class S800PaceSceneCfg(PaceSim2realSceneCfg):
                 solver_velocity_iteration_count=0,
             ),
         ),
-        init_state=ArticulationCfg.InitialStateCfg(pos=(0.0, 0.0, 1.5)), # 需要将s800悬空 避免脚接触地面
+        # 实测 pelvis 底面 1.05 m 离地；见文件顶部 S800_BASE_HEIGHT_M 的换算。
+        init_state=ArticulationCfg.InitialStateCfg(pos=(0.0, 0.0, S800_BASE_HEIGHT_M)),
         actuators={"joints": S800_ACTUATOR_CFG},
     )
 

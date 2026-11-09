@@ -1,0 +1,33 @@
+{
+  "description": "S800 stand approximation. Column is 200 x 90 x 810 mm. Base is a central pedestal plus a rear wall (T/凸 shape): both sides are open, so a hanging leg is free; inward foot motion hits the central pedestal, backward motion hits the rear wall.",
+  "frame": "robot_base: +x forward, +y left, +z up; center is relative to the robot base-link origin (pelvis). Base origin is 1.076 m above the floor; pelvis bottom is 1.00 m.",
+  "parts": [
+    {
+      "name": "base_center",
+      "shape": "box",
+      "size": [0.40, 0.20, 0.19],
+      "center": [0.0, 0.0, -0.981],
+      "rpy": [0.0, 0.0, 0.0],
+      "color": [0.55, 0.55, 0.55],
+      "collision": true
+    },
+    {
+      "name": "base_rear",
+      "shape": "box",
+      "size": [0.05, 0.86, 0.19],
+      "center": [-0.175, 0.0, -0.981],
+      "rpy": [0.0, 0.0, 0.0],
+      "color": [0.55, 0.55, 0.55],
+      "collision": true
+    },
+    {
+      "name": "column",
+      "shape": "box",
+      "size": [0.20, 0.09, 0.81],
+      "center": [0.0, 0.0, -0.481],
+      "rpy": [0.0, 0.0, 0.0],
+      "color": [0.75, 0.45, 0.15],
+      "collision": true
+    }
+  ]
+}

@@ -342,3 +342,91 @@ python -u scripts/pace/fit.py --headless --group arms --num_envs 256 \
 ```
 
 这里的 3 来自这份手臂数据，不能套用腿部数据的 5。100 代只是起始预算，尚未运行这轮更正后的正式拟合。若更正延迟后仍有恢复困难，下一项应做保持肩部/近端目标不扫频、单独激励肘腕的对照，以检查近端激励导致的腕部放大，再决定是否调整各关节幅值/带宽；不是直接提高所有增益或放宽力矩限值。
+
+## 真机拟合：扩大 bounds 对照（2026-11-05）
+
+`fit.py --bounds_scale 2` 仅扩大所选组的连续参数搜索范围，默认 `1` 保持原配置：
+
+| 参数 | 扩大规则 | 手部示例（肩、肘俯仰） |
+|---|---|---|
+| armature | 下界除以 2，上界乘以 2 | `[0.005, 0.15] → [0.0025, 0.30]` |
+| 粘滞摩擦 | 下界除以 2，上界乘以 2 | `[0, 1] → [0, 2]` |
+| 库仑摩擦 | 下界除以 2，上界乘以 2 | `[0, 1.6] → [0, 3.2]` |
+| bias | 围绕原中点将半宽乘以 2 | `[-0.1, 0.1] → [-0.2, 0.2] rad` |
+| delay | 保持原范围 | `[0, 10]` 步 |
+
+未拟合组的 bounds 不变；没有显式 warm start 时，初始参数仍取**原 bounds 中点**。初始归一化 sigma 保持 0.5，但物理参数采样尺度随区间扩大，因此这不是“只改边界、采样分布完全不变”的实验。GT、轨迹、PD、USD 配置不由此选项修改。启动时打印每个活动参数的新旧 bounds，`config.pt` 保存实际 bounds 及 `fit.bounds_scale`、`fit.original_bounds`、`fit.sigma`、`fit.usd_path`。
+
+先对最近的手部实验做对照，继续使用原来的中断采集前缀（8.86 秒诊断数据，不是完整扫频）：
+
+```bash
+python -u scripts/pace/fit.py --headless --group arms --num_envs 256 \
+    --data s800_real/chirp_1793777886655542299_1273_arm/pace_arms_command_partial_diagnostic.pt \
+    --delay_mode command --bounds_scale 2 --sigma 0.5 --seed 0 \
+    --max_iterations 2000 --save_interval 10 --epsilon 0 \
+    --log_dir logs/pace/s800_real_arms_partial_command_bounds2
+```
+
+腿部对应命令：
+
+```bash
+python -u scripts/pace/fit.py --headless --group legs --num_envs 256 \
+    --data s800_real/chirp_1793778278904904944_1433_leg/pace_legs_command.pt \
+    --delay_mode command --bounds_scale 2 --sigma 0.5 --seed 0 \
+    --max_iterations 1000 --save_interval 10 --epsilon 0 \
+    --log_dir logs/pace/s800_real_legs_command_bounds2
+```
+
+严格对照需要相同机器人资产。原 11 月 4 日腿部实验使用的是较旧模型，而目前环境配置已指向新 USD；若与旧腿部结果比较，两者差异不能全部归因于 bounds。可在当前模型下将 `--bounds_scale 2` 改为 `--bounds_scale 1`、日志根目录后缀改为 `bounds1`，建立配套基线。
+
+比较历史最低 loss、跳变发生代数和参数是否持续贴边。当前 `best_params.pt` 仍是最近保存代的最优，不是历史最优；应结合 TensorBoard 全程曲线判断，不能仅看最后一代。此改动没有修正优化器数值处理或保存逻辑，以便分别评估边界实验。
+
+## 支架障碍物仿真（可选）
+
+真机悬吊时机器人周围有立柱、底座和横梁，但 `fit` 环境不建这些几何。为避免采到"仿真里不碰、真机上碰"的轨迹，`data_collection.py` 可以在仿真里加入一个**静态障碍物支架**，逐帧记录机器人各连杆与支架的接触力。
+
+- 支架只是碰撞障碍物，不是支撑模型：基座仍由 `fix_root_link` 固定，支架不承力。基座高度已统一改为 `S800_BASE_HEIGHT_M = 1.076 m`（见 `s800_pace_env_cfg.py`），所有 S800 仿真共用；固定基座、无地面接触时关节动力学不受影响。
+- 立柱：截面 **200 × 90 mm**（x × y），高 **0.81 m**；底面在底座顶面 0.19 m，顶面到 pelvis 底面 1.00 m。
+- 底座改成**凸字形/开槽**：中央 pedestal 0.40 × 0.20 × 0.19 m，后方挡墙 0.05 × 0.86 × 0.19 m；两侧和前方向完全开放。腿自然下垂时落在开放区，不会碰底座；脚向内会碰中央 pedestal（y = ±0.10 m），脚向后会碰后挡墙（x = −0.15 m），向外不挡。
+  降低 5 cm 后，默认 rest 姿态脚底离地约 **0.088 m**（原来 0.138 m），零位约 **0.062 m**；`clearance` 宽外展 rest 约 0.196 m。
+- **stance 需要加宽**：默认 `scaled_legacy`（hip roll 约 ±0.128 rad）下，右腿实际跟踪内收，约 1.35 s 会碰中央 pedestal；用 `--trajectory_profile clearance` 的宽外展姿态则不碰。真机如果也是这个立柱/底座，默认站姿需要更外展。
+- 坐标统一在**机器人 base link（pelvis）坐标系**：`+x` 向前、`+y` 向左、`+z` 向上；`center` 是相对 pelvis 原点的位置，单位 m。
+  真机实测 pelvis 底面距地约 1.05 m；用户随后要求整体再降低 5 cm 以接近真实实验场景，因此取 pelvis 底面 **1.00 m**。base link 网格底面在原点下方 0.076 m，所以仿真 base origin 设为 **1.076 m**（`S800_BASE_HEIGHT_M`）。若量的是“距 pelvis 底面”，换算为 `center_z = -(距离 + 0.076)`。
+- 实测约束：`HIP_PITCH` 没有正向（腿不能向后摆，规划值应 ≤ 0）；`HIP_ROLL` 没有负向（腿不能向内收，左腿 ≥ 0、右腿 ≤ 0）。`data_collection.py` 在规划阶段用 `--fixture_joint_margin`（默认 0.01 rad）检查，规划超限直接报错；实际跟踪额外放宽 0.02 rad 后仍超限则拒收。
+- 支持 `box` 和 `cylinder`；`rpy` 是 URDF 固定轴 roll/pitch/yaw，单位 rad；`color` 只影响可视化。
+  每个 part 可设 `"collision": true/false`；当前中央 pedestal、后挡墙和立柱都是 true。
+
+先开 GUI 看一眼（不会覆盖默认采集文件）：
+
+```bash
+python -u scripts/pace/data_collection.py --group legs --delay_mode command \
+    --fixture --duration 2 --no-plot --output s800_sim/fixture_preview.pt
+```
+
+
+正式采集：
+
+```bash
+python -u scripts/pace/data_collection.py --headless --group legs --delay_mode command \
+    --fixture --fixture_contact_threshold 1.0 \
+    --output s800_sim/chirp_legs_fixture.pt
+```
+
+自定义尺寸：
+
+```bash
+python -u scripts/pace/data_collection.py --headless --group arms --delay_mode command \
+    --fixture_plan scripts/pace/fixtures/s800_stand.json \
+    --output s800_sim/chirp_arms_fixture.pt
+```
+
+接触判定与拒收：
+
+- `--fixture_contact_threshold` 默认 1.0 N；任一时刻、任一连杆的接触力范数超过它即判为接触。记录的是每个连杆的**净接触力**，所以地面接触和自碰撞也会被计入；本实验基座悬空、默认关闭自碰撞时，非零接触基本就是支架。
+- `--fixture_reject_on_contact` 默认开启，数据保存为 `.rejected.pt`，和腿部间隙拒收走同一套流程。
+- 想故意让腿向后/向内摆来观察门槛或立柱碰撞，加 `--no-fixture_joint_check` 关掉方向约束检查；默认采集不要关。
+- 每次都会保存 `.fixture_contact.csv`（逐帧、逐连杆的接触力范数）；启用 `--plot` 时还会保存 `.fixture_contact.png`（全连杆最大接触力曲线）并弹出接触力图。
+- `.pt` 内新增 `fixture_contact_force_norm`（`(时间步, 连杆数)`），`experiment.fixture` 保存支架 JSON、阈值、首次接触时间/连杆、各连杆峰值。
+- `fit.py` 默认拒绝 `experiment.fixture.contact_detected=True` 的数据，因为 fit 环境没有支架接触模型。只用于看残差时可加 `--allow_fixture_contact`，但不能当作有效辨识结果。
+
+**限制**：支架是刚体静态碰撞几何，不模拟夹具柔性、悬吊摆动或夹具滑动；接触力是 PhysX 求解结果，不是真机标定值；当前 URDF 的踝-滚转网格在零位只到 base origin 下方约 1.014 m，比实测鞋底高约 0.08 m，因此仿真地面间隙偏保守，脚底离地 3 cm 的实测值不能直接由 URDF 网格复现；记录的是机器人连杆的净接触力，不区分碰到支架的哪一块（需要时把支架拆成多个 JSON 分批运行）。这个功能用于筛选轨迹和定位碰撞时刻，不能替代真机间隙检查。要建准确的支架，需要提供：底座长宽厚、立柱截面和高度、横梁位置尺寸，以及立柱顶端/横梁相对 pelvis 的前后、左右、高度距离。

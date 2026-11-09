@@ -7,11 +7,13 @@
 """Launch Isaac Sim Simulator first."""
 
 import argparse
+import math
 import os
 import sys
 from pathlib import Path
 from experiment_utils import (build_joint_groups, select_groups, recording_name, configure_delay,
-                              actuator_metadata, validate_recording, freeze_unfitted_truth)
+                              actuator_metadata, validate_recording, freeze_unfitted_truth,
+                              expand_fit_bounds)
 
 from isaaclab.app import AppLauncher
 
@@ -24,6 +26,8 @@ parser.add_argument("--task", type=str, default="Isaac-Pace-S800-v0", help="Name
 # Torso and arms are coupled: use a measured prior/warm start, or explicitly request
 # --freeze_unfitted_gt for a controlled sim-to-sim recovery experiment.
 parser.add_argument("--data", type=str, help="数据路径；相对路径从 data/ 起算。")
+parser.add_argument("--wrist_hold", action="store_true",
+                    help="26 DoF 真机手臂拟合：腕按记录增益保持，拟合/损失仅含10个肩肘关节。")
 parser.add_argument("--delay_mode", choices=("command", "torque"), default=None,
                     help="默认跟随录制元数据；分组新实验默认 command。")
 parser.add_argument("--fix_delay", type=int, default=None, help="固定整数延时，不参与搜索。")
@@ -42,6 +46,9 @@ parser.add_argument("--opt_delay", action=argparse.BooleanOptionalAction, defaul
                     help="每轮是否把全局 delay 参数一起放开重新优化（默认放开；关掉则冻结在 warm_start 上）。")
 parser.add_argument("--sigma", type=float, default=None,
                     help="覆盖 cfg 里的 CMA-ES 初始 sigma。warm_start 是「接着细化」时通常要调小。")
+parser.add_argument("--bounds_scale", type=float, default=1.0,
+                    help="扩大本组连续参数 bounds：正参数下界除以该值、上界乘以该值；"
+                         "bias 区间宽度乘以该值。>=1；delay 不变；默认 1 使用原配置。")
 parser.add_argument("--epsilon", type=float, default=None,
                     help="覆盖 cfg 的提前停止判据（种群 (max-min)/min < epsilon 即判收敛）。"
                          "分组实验默认设 0 关闭提前停止，按指定迭代次数运行。")
@@ -51,11 +58,18 @@ parser.add_argument("--floor_test", action="store_true",
                          "逐位复现数据（损失 <1e-10）。**这是识别流程最重要的一步自检** —— "
                          "不通过就说明数据与模型口径不一致，任何拟合结果都不可信。"
                          "建议 --num_envs 32 即可（框已收缩，样本几乎相同）。")
+parser.add_argument("--allow_fixture_contact", action="store_true",
+                    help="允许拟合接触过支架的数据。默认拒绝：fit 仿真不建支架，这组接触力"
+                         "没有对应模型；只用于检查残差，不能当作有效辨识结果。")
 
 # append AppLauncher cli args
 AppLauncher.add_app_launcher_args(parser)
 # parse the arguments
 args_cli = parser.parse_args()
+if not math.isfinite(args_cli.bounds_scale) or args_cli.bounds_scale < 1:
+    parser.error("--bounds_scale 必须是 >=1 的有限数")
+if args_cli.floor_test and args_cli.bounds_scale != 1:
+    parser.error("--floor_test 不能与扩大 bounds 同时使用")
 
 # launch omniverse app
 app_launcher = AppLauncher(args_cli)
@@ -93,6 +107,24 @@ def main():
     if not data_file.is_absolute():
         data_file = project_root() / "data" / data_file
     data = torch.load(data_file, map_location="cpu", weights_only=True)
+    if args_cli.wrist_hold:
+        if args_cli.group != "arms" or args_cli.floor_test or args_cli.freeze_unfitted_gt:
+            raise ValueError("wrist_hold requires real-data --group arms, without GT options")
+        from wrist_diagnostic import configure, WRISTS
+        recorded = data["experiment"]
+        names = data["joint_names"]
+        wi = [names.index(n) for n in WRISTS]
+        if not torch.all(recorded["kp"][wi] == recorded["kp"][wi[0]]) or not torch.all(recorded["kd"][wi] == recorded["kd"][wi[0]]):
+            raise ValueError("This wrist_hold profile expects equal wrist gains")
+        configure(env_cfg, float(recorded["kp"][wi[0]]), float(recorded["kd"][wi[0]]))
+        if names != env_cfg.sim2real.joint_order:
+            raise ValueError("Exported 26-DoF joint order mismatch")
+        base = env_cfg.scene.robot.actuators["joints"]
+        for attr, key in (("stiffness", "kp"), ("damping", "kd")):
+            setattr(base, attr, {n: float(recorded[key][i]) for i, n in enumerate(names) if n not in WRISTS})
+        _, selected = select_groups("arms", names)
+        selected = [i for i in selected if names[i] not in WRISTS]
+        print(f"[wrist_hold] 26 DoF; wrist Kp={float(recorded['kp'][wi[0]])}, Kd={float(recorded['kd'][wi[0]])}; fit 10 shoulder/elbow joints")
     mode = args_cli.delay_mode or data.get("experiment", {}).get("delay_mode", default_mode)
     recorded_delay = data.get("gt", {}).get("delay")
     delay_setting = ("recorded truth (floor_test)" if args_cli.floor_test else
@@ -130,14 +162,24 @@ def main():
     print(f"[INFO]: Gym action space: {env.action_space}")
 
     # Create optimization
-    bounds_params = env_cfg.sim2real.bounds_params.to(env.unwrapped.device)
+    original_bounds = env_cfg.sim2real.bounds_params.to(env.unwrapped.device).clone()
+    bounds_params = expand_fit_bounds(original_bounds, selected, args_cli.bounds_scale)
     articulation = env.unwrapped.scene["robot"]
     joint_order = env_cfg.sim2real.joint_order
+    if args_cli.bounds_scale != 1:
+        print(f"[bounds] scale={args_cli.bounds_scale:g}; 保留原 bounds 中点作为默认初始均值")
+        for block, label in enumerate(("armature", "viscous", "friction", "bias")):
+            for i in selected:
+                k = block * len(joint_order) + i
+                print(f"[bounds] {joint_order[i]} {label}: "
+                      f"{original_bounds[k].tolist()} -> {bounds_params[k].tolist()}")
     sim_joint_ids = torch.tensor([articulation.joint_names.index(name) for name in joint_order], device=env.unwrapped.device, dtype=torch.int32)
 
     log_name = env_cfg.sim2real.robot_name if active_groups is None else f"{env_cfg.sim2real.robot_name}_{group_label}_{mode}"
     log_dir = args_cli.log_dir or project_root() / "logs" / "pace" / log_name
-    validate_recording(data, joint_order, selected, actuator_metadata(env, env_cfg, sim_joint_ids, mode))
+    validate_recording(data, joint_order, selected,
+                       actuator_metadata(env, env_cfg, sim_joint_ids, mode),
+                       allow_fixture_contact=args_cli.allow_fixture_contact)
     print(f"[experiment] {data_file}, group={group_label}, delay={mode}, loss joints={len(selected)}")
     time_data = data["time"].to(env.unwrapped.device)
     target_dof_pos = data["des_dof_pos"].to(env.unwrapped.device)
@@ -173,6 +215,9 @@ def main():
 
     # ── 分组优化：解析要优化的组 + 载入 warm start ────────────────────────
     groups = build_joint_groups(joint_order)
+    if args_cli.wrist_hold:
+        groups["wrists"] = [i for i, n in enumerate(joint_order) if "WRIST" in n]
+        groups["arms"] = selected
     print("[group] 分组: " + ", ".join(f"{g}={len(v)}关节" for g, v in groups.items() if v)
           + (f"（空组: {[g for g, v in groups.items() if not v]}）"
              if any(not v for v in groups.values()) else ""))
@@ -182,7 +227,8 @@ def main():
         # 但腿仍通过基座与全身质量耦合，未拟合组的参数错了照样会传到本组。
         print("[group] 未拟合参数来自 warm_start 或 bounds 中点；腿与上半身仍通过基座耦合。")
 
-    warm_start = None
+    # Keep the physical initial mean comparable when widening the search domain.
+    warm_start = original_bounds.mean(dim=1).cpu() if args_cli.bounds_scale != 1 else None
     if args_cli.warm_start:
         ws_path = Path(args_cli.warm_start)
         if ws_path.is_dir():
@@ -192,6 +238,15 @@ def main():
             ws_path = cands[-1]
         warm_start = torch.load(ws_path, map_location="cpu")
         print(f"[group] warm_start = {ws_path}（{warm_start.numel()} 个参数）")
+
+    if args_cli.wrist_hold and not args_cli.warm_start:
+        if warm_start is None:
+            warm_start = original_bounds.mean(dim=1).cpu()
+        n = len(joint_order)
+        for i in groups["wrists"]:
+            for block, value in enumerate((.005, .1, .05, 0.)):
+                warm_start[block*n+i] = value
+        print("[wrist_hold] wrist dynamics frozen priors: armature=.005, viscous=.1, friction=.05, bias=0 (NOT hardware GT)")
 
     if args_cli.floor_test:
         # Floor checks must initialize every frozen dimension at truth too.
@@ -214,9 +269,14 @@ def main():
     # Rest/taper and heterogeneous chirps cannot use the old time-to-frequency labels.
     segment_edges = () if "experiment" in data else env_cfg.sim2real.cmaes.segment_edges_hz
     data["fit"] = {"groups": active_groups, "fitted_joints": selected,
+                   "wrist_hold": args_cli.wrist_hold,
                    "freeze_unfitted_gt": args_cli.freeze_unfitted_gt, "floor_test": args_cli.floor_test,
                    "data_file": str(data_file), "delay_mode": mode, "seed": args_cli.seed,
-                   "fix_delay": args_cli.fix_delay, "warm_start": args_cli.warm_start}
+                   "fix_delay": args_cli.fix_delay, "warm_start": args_cli.warm_start,
+                   "bounds_scale": args_cli.bounds_scale,
+                   "original_bounds": original_bounds.cpu(),
+                   "sigma": env_cfg.sim2real.cmaes.sigma if args_cli.sigma is None else args_cli.sigma,
+                   "usd_path": getattr(env_cfg.scene.robot.spawn, "usd_path", None)}
 
     opt = CMAESOptimizer(
         bounds=bounds_params,

@@ -7,6 +7,7 @@
 """Launch Isaac Sim Simulator first."""
 
 import argparse
+import math
 from pathlib import Path
 from datetime import datetime
 import json
@@ -42,7 +43,32 @@ parser.add_argument("--scale_factor", type=float, default=None,
                     help="仅 scaled_legacy 使用：本组原 scale 的乘数 (0,1]；legs/all 默认 0.8，上身组默认 1。")
 parser.add_argument("--clearance_margin", type=float, default=0.02, help="腿间和离地最小保守间隙 [m]。")
 parser.add_argument("--trajectory_plan", type=Path, default=None, help="读取之前保存的 trajectory.json 中的中心和幅值，仍须通过检查。")
+parser.add_argument("--leg_sweep", choices=("all", "hips", "knee_ankle"), default="all",
+                    help="legs 分两次采集：hips 仅扫髋；knee_ankle 抬髋保持、按历史幅值扫膝踝。")
+parser.add_argument("--hip_pitch_hold", type=float, default=-0.8,
+                    help="knee_ankle 模式髋 pitch 保持角 rad，负值向前抬腿；默认 -.8 是待验证候选。")
+# ── 支架障碍物（真机夹具）───────────────────────────────────────────────
+# 只在 data_collection 中加；fit 不建支架，所以接触过的数据默认拒收。
+parser.add_argument("--fixture", action=argparse.BooleanOptionalAction, default=False,
+                    help="在仿真中加入 S800 支架障碍物（默认占位尺寸，需按真机测量修改 JSON）。")
+parser.add_argument("--fixture_plan", type=Path, default=None,
+                    help="支架几何 JSON；给出时自动启用，相对路径从当前目录起算。")
+parser.add_argument("--fixture_contact_threshold", type=float, default=1.0,
+                    help="支架接触判定阈值 [N]；逐连杆接触力范数超过它即记录。")
+parser.add_argument("--fixture_reject_on_contact", action=argparse.BooleanOptionalAction, default=True,
+                    help="接触超过阈值时把数据保存为 .rejected.pt（默认开）。")
+parser.add_argument("--fixture_joint_margin", type=float, default=0.01,
+                    help="实测支架方向约束的规划容差 [rad]：HIP_PITCH<=0、HIP_ROLL 只向外。"
+                         "实际跟踪再放宽 0.02 rad 后仍超限则拒收。")
+parser.add_argument("--fixture_joint_check", action=argparse.BooleanOptionalAction, default=True,
+                    help="默认开启实测方向约束；关掉后可以故意让腿向后/向内摆，用来观察门槛/立柱碰撞。")
 parser.add_argument("--seed", type=int, default=0, help="仿真环境随机种子。")
+parser.add_argument("--wrist_diagnostic", action="store_true",
+                    help="使用 26 自由度资产，四个 wrist 只保持零位；保存完整 PD 力矩诊断。")
+parser.add_argument("--wrist_kp", type=float, default=20., help="wrist diagnostic 保持 Kp，2026-11-05 仿真基线。")
+parser.add_argument("--wrist_kd", type=float, default=1., help="wrist diagnostic 保持 Kd，2026-11-05 仿真基线。")
+parser.add_argument("--encoder_bias", type=float, default=None,
+                    help="仿真注入编码器偏置 rad；普通采集默认 .05，wrist diagnostic 默认 0。")
 # ── 对照组：全场统一 GT ──────────────────────────────────────────────────
 # 目的：隔离「搜索维度」这一个变量。
 # ANYmal 的 round-trip 能到 <1%，一个尚未排除的原因是它的 GT 全场统一
@@ -78,6 +104,9 @@ from isaaclab_tasks.utils import parse_env_cfg
 
 import pace_sim2real.tasks  # noqa: F401
 from pace_sim2real.utils import project_root, joint_type
+from s800_fixture import (default_fixture_path, load_fixture_spec, add_fixture_to_scene,
+                          add_contact_sensor, fixture_joint_limit_violation,
+                          summarize_contact, write_contact_csv)
 
 def main():
     # parse configuration
@@ -91,6 +120,17 @@ def main():
         raise ValueError("This collector contains S800-specific truth and trajectories")
     if args_cli.scale_factor is not None and (args_cli.trajectory_profile != "scaled_legacy" or args_cli.trajectory_plan):
         raise ValueError("scale_factor requires scaled_legacy without a trajectory_plan")
+    if args_cli.leg_sweep != "all" and (args_cli.group != "legs" or
+            args_cli.trajectory_profile != "legacy" or args_cli.trajectory_plan or args_cli.scale_factor is not None):
+        raise ValueError("leg_sweep requires --group legs --trajectory_profile legacy, without trajectory_plan/scale_factor")
+    wrist_diagnostic = None
+    if args_cli.wrist_diagnostic:
+        if args_cli.trajectory_profile == "clearance":
+            raise ValueError("26-DoF diagnostic does not support the old 22-DoF clearance model")
+        from wrist_diagnostic import configure
+        wrist_diagnostic = configure(env_cfg, args_cli.wrist_kp, args_cli.wrist_kd)
+        print(f"[wrist] 26 DoF; held at zero; Kp={args_cli.wrist_kp}, Kd={args_cli.wrist_kd}")
+        print(f"[wrist] {wrist_diagnostic['limitations']}")
     mode = args_cli.delay_mode or ("command" if args_cli.group != "all" else "torque")
     configure_delay(env_cfg, mode)
     if args_cli.self_collisions is not None:
@@ -101,6 +141,28 @@ def main():
         env_cfg.scene.robot.spawn.articulation_props.enabled_self_collisions = False
     if env_cfg.decimation != 1:
         raise ValueError("PACE recording requires decimation=1")
+    # ── 支架障碍物：在 gym.make 之前挂到 scene cfg 上 ─────────────────────
+    # 绝对路径 /World/s800_fixture/... 只适用于单环境采集；多环境会共享同一支架，
+    # 因此和 data collection 的 num_envs=1 约束一起检查。
+    fixture_spec = None
+    fixture_prim_paths = []
+    fixture_requested = args_cli.fixture or args_cli.fixture_plan is not None
+    if args_cli.fixture_contact_threshold < 0 or not math.isfinite(args_cli.fixture_contact_threshold):
+        raise ValueError("fixture_contact_threshold must be finite and nonnegative")
+    if fixture_requested:
+        if args_cli.num_envs != 1:
+            raise ValueError("Fixture collision logging requires --num_envs 1")
+        spec_path = args_cli.fixture_plan or default_fixture_path()
+        fixture_spec = load_fixture_spec(spec_path)
+        fixture_prim_paths = add_fixture_to_scene(
+            env_cfg.scene, fixture_spec, env_cfg.scene.robot.init_state.pos,
+            env_cfg.scene.robot.init_state.rot)
+        add_contact_sensor(env_cfg.scene)
+        env_cfg.scene.robot.spawn.activate_contact_sensors = True
+        print(f"[fixture] spec={spec_path} parts={[p['name'] for p in fixture_spec['parts']]}", flush=True)
+        print(f"[fixture] prims={fixture_prim_paths}; contact threshold="
+              f"{args_cli.fixture_contact_threshold} N; reject_on_contact={args_cli.fixture_reject_on_contact}",
+              flush=True)
     # create environment
     env = gym.make(args_cli.task, cfg=env_cfg)
 
@@ -110,8 +172,16 @@ def main():
     # reset environment
 
     articulation = env.unwrapped.scene["robot"]
+    contact_sensor = None
+    if fixture_spec is not None:
+        contact_sensor = env.unwrapped.scene.sensors.get("fixture_contact")
+        if contact_sensor is None:
+            raise RuntimeError("Fixture enabled but scene did not create the contact sensor")
+        print(f"[fixture] contact bodies ({contact_sensor.num_bodies}): {contact_sensor.body_names}", flush=True)
 
     joint_order = env_cfg.sim2real.joint_order
+    if wrist_diagnostic and set(articulation.joint_names) != set(joint_order):
+        raise ValueError("Converted USD joint set differs from the 26-DoF configuration")
     joint_ids = torch.tensor([articulation.joint_names.index(name) for name in joint_order], device=env.unwrapped.device, dtype=torch.int32)
 
     # print joints order
@@ -161,7 +231,14 @@ def main():
         "SHOULDER_PITCH": 0.3, "SHOULDER_ROLL": 0.3, "SHOULDER_YAW": 0.3,
         "ELBOW_PITCH": 0.3, "ELBOW_YAW": 0.05,
     }
-    GT_BIAS = 0.05  # 全场统一 [rad]
+    if wrist_diagnostic:
+        # Explicit provisional dynamics, not identified hardware truth.
+        GT_ARMATURE_BY_TYPE.update(WRIST_PITCH=.005, WRIST_ROLL=.005)
+        GT_DAMPING_BY_TYPE.update(WRIST_PITCH=.1, WRIST_ROLL=.1)
+        GT_FRICTION_BY_TYPE.update(WRIST_PITCH=.05, WRIST_ROLL=.05)
+    GT_BIAS = args_cli.encoder_bias if args_cli.encoder_bias is not None else (0. if wrist_diagnostic else .05)
+    if not torch.isfinite(torch.tensor(GT_BIAS)):
+        raise ValueError("encoder_bias must be finite")
 
     def by_joint_order(table):
         """把「类型 → 值」展开成按 joint_order 排列的 (1, n) 张量。"""
@@ -190,6 +267,14 @@ def main():
 
     time_lag = torch.tensor([args_cli.delay_steps], dtype=torch.int, device=env.unwrapped.device)
     _, selected = select_groups(args_cli.group, joint_order)
+    wrist_indices = [i for i, name in enumerate(joint_order) if "WRIST" in name] if wrist_diagnostic else []
+    selected = [i for i in selected if i not in wrist_indices]
+    split_motion = None
+    if args_cli.leg_sweep != "all":
+        from s800_motion import split_leg_motion
+        split_motion = split_leg_motion(joint_order, args_cli.leg_sweep, args_cli.hip_pitch_hold)
+        selected = split_motion[2]
+        print(f"[leg_sweep] {args_cli.leg_sweep}; excited={[joint_order[i] for i in selected]}")
     gt_vector = torch.cat([x.flatten() for x in (armature, damping, friction, bias, time_lag)])
     bounds = env_cfg.sim2real.bounds_params.to(gt_vector.device)
     if torch.any(gt_vector < bounds[:, 0]) or torch.any(gt_vector > bounds[:, 1]):
@@ -254,6 +339,7 @@ def main():
         "ANKLE_PITCH": 3.0, "ANKLE_ROLL": 6.0,
         "SHOULDER_PITCH": 3.0, "SHOULDER_ROLL": 3.0, "SHOULDER_YAW": 6.0,
         "ELBOW_PITCH": 3.0, "ELBOW_YAW": 6.0,
+        "WRIST_PITCH": 3.0, "WRIST_ROLL": 3.0,
     }
     f1_per_joint = by_joint_order(F1_BY_TYPE)
 
@@ -263,6 +349,8 @@ def main():
     from s800_motion import nominal_motion, scaled_nominal_motion, choose_leg_motion
     from s800_clearance import LegClearance, with_midpoints
     center, amplitude = nominal_motion(joint_order, hold_arms_outward=args_cli.group == "legs")
+    if split_motion is not None:
+        center, amplitude = split_motion[:2]
     scale_factor = None
     if args_cli.trajectory_profile == "scaled_legacy" and not args_cli.trajectory_plan:
         scale_factor = args_cli.scale_factor if args_cli.scale_factor is not None else (.8 if args_cli.group in ("legs", "all") else 1.)
@@ -292,7 +380,18 @@ def main():
         center, amplitude, planned_report = choose_leg_motion(
             checker, wave.cpu().numpy(), center.numpy(), amplitude.numpy(), bias[0].cpu().numpy(),
             selected, args_cli.clearance_margin)
+    if wrist_diagnostic:
+        center[wrist_indices] = 0.
+        amplitude[wrist_indices] = 0.
     commands = center.to(wave.device) + wave * amplitude.to(wave.device)
+    fixture_joint_plan = None
+    if fixture_spec is not None and args_cli.fixture_joint_check:
+        fixture_joint_plan = fixture_joint_limit_violation(
+            commands, joint_order, args_cli.fixture_joint_margin)
+        if not fixture_joint_plan["passed"]:
+            raise ValueError("Planned trajectory violates measured stand joint ranges: "
+                             f"{fixture_joint_plan}")
+        print(f"[fixture] planned joint ranges passed: {fixture_joint_plan['joints']}", flush=True)
     if checker is not None:
         # Check the final float32 commands too (including an explicit user plan).
         physical_targets = (commands + bias).cpu().numpy()
@@ -305,6 +404,10 @@ def main():
     print(f"[trajectory] center(rad)={center.tolist()}", flush=True)
     print(f"[trajectory] signed amplitude(rad)={amplitude.tolist()}", flush=True)
     num_steps = len(t)
+    contact_force_norm = None
+    if contact_sensor is not None:
+        contact_force_norm = torch.zeros((num_steps, contact_sensor.num_bodies),
+                                         device=env.unwrapped.device)
     trajectory = torch.zeros((num_steps, articulation.num_joints), device=env.unwrapped.device)
     trajectory[:, joint_ids] = commands
     metadata = actuator_metadata(env, env_cfg, joint_ids, mode)
@@ -312,7 +415,18 @@ def main():
                     duration=duration, f0=f0, f1_per_joint=f1_per_joint.cpu(),
                     trajectory_profile=args_cli.trajectory_profile, center_rad=center.cpu(),
                     signed_amplitude_rad=amplitude.cpu(), planned_clearance=planned_report,
-                    scale_factor=scale_factor)
+                    fixture_joint_ranges=fixture_joint_plan, scale_factor=scale_factor)
+    if split_motion is not None:
+        metadata["leg_sweep"] = args_cli.leg_sweep
+        metadata["hip_pitch_hold"] = args_cli.hip_pitch_hold if args_cli.leg_sweep == "knee_ankle" else None
+    if wrist_diagnostic:
+        metadata["wrist_diagnostic"] = wrist_diagnostic
+        metadata["torque_sample_semantics"] = (
+            "dof_torque retains previous-step applied torque (legacy). "
+            "pd_requested uses this row's pre-step encoder state and undelayed target. "
+            "pd_computed and applied_torque_step are actuator outputs captured after env.step, "
+            "for this row's transition; decimation=1. In torque-delay mode computed/applied "
+            "refer to different queued commands. Not measured contact/reaction torque.")
 
     articulation.write_joint_position_to_sim(commands[0].unsqueeze(0) + bias, joint_ids=joint_ids)
     articulation.write_joint_velocity_to_sim(torch.zeros_like(bias), joint_ids=joint_ids)
@@ -323,6 +437,13 @@ def main():
     dof_target_pos_buffer = torch.zeros(num_steps, len(joint_ids), device=env.unwrapped.device)
     dof_vel_buffer = torch.zeros(num_steps, len(joint_ids), device=env.unwrapped.device)
     dof_torque_buffer = torch.zeros(num_steps, len(joint_ids), device=env.unwrapped.device)
+    if wrist_diagnostic:
+        from wrist_diagnostic import predicted_pd, save_torque_report
+        pd_requested = torch.zeros_like(dof_torque_buffer)
+        pd_computed = torch.zeros_like(dof_torque_buffer)
+        applied_step = torch.zeros_like(dof_torque_buffer)
+        kp = metadata["kp"].to(env.unwrapped.device)
+        kd = metadata["kd"].to(env.unwrapped.device)
     time_data = t
     while simulation_app.is_running():
         # run everything in inference mode
@@ -332,10 +453,18 @@ def main():
             dof_pos_buffer[counter, :] = robot.data.joint_pos[0, joint_ids] - bias[0]
             dof_vel_buffer[counter, :] = robot.data.joint_vel[0, joint_ids]
             dof_torque_buffer[counter, :] = robot.data.applied_torque[0, joint_ids]
+            if wrist_diagnostic:
+                pd_requested[counter] = predicted_pd(commands[counter], dof_pos_buffer[counter],
+                                                      dof_vel_buffer[counter], kp, kd)
             actions = torch.zeros(env.action_space.shape, device=env.unwrapped.device)
             actions = trajectory[counter % num_steps, :].unsqueeze(0).repeat(env.unwrapped.num_envs, 1)
             # apply actions
             obs, _, _, _, _ = env.step(actions)
+            if contact_sensor is not None:
+                contact_force_norm[counter] = contact_sensor.data.net_forces_w[0].norm(dim=-1)
+            if wrist_diagnostic:
+                pd_computed[counter] = robot.data.computed_torque[0, joint_ids]
+                applied_step[counter] = robot.data.applied_torque[0, joint_ids]
             dof_target_pos_buffer[counter, :] = commands[counter]
             counter += 1
             if counter % log_interval_steps == 0:
@@ -356,7 +485,45 @@ def main():
         actual_report["midpoint_checks"] = True
         metadata["actual_clearance"] = actual_report
         print(f"[clearance] actual={actual_report}", flush=True)
+    fixture_joint_actual = None
+    if fixture_spec is not None and args_cli.fixture_joint_check:
+        # dof_pos_buffer is encoder reading minus injected bias, i.e. the same space
+        # as the commanded targets. Give tracking a separate 0.02 rad tolerance.
+        actual_q = torch.cat([dof_pos_buffer, articulation.data.joint_pos[:, joint_ids] - bias],
+                             dim=0).cpu().numpy()
+        fixture_joint_actual = fixture_joint_limit_violation(
+            actual_q, joint_order, args_cli.fixture_joint_margin + .02)
+        if not fixture_joint_actual["passed"]:
+            print(f"[fixture] ACTUAL joint range exceeded: {fixture_joint_actual['worst']}", flush=True)
+    fixture_summary = None
+    if contact_sensor is not None:
+        fixture_summary = summarize_contact(
+            contact_force_norm.cpu().numpy(), t.cpu().numpy(), contact_sensor.body_names,
+            args_cli.fixture_contact_threshold, ignore_bodies=("LINK_BASE",))
+        fixture_summary["spec"] = fixture_spec
+        fixture_summary["reject_on_contact"] = args_cli.fixture_reject_on_contact
+        fixture_summary["planned_joint_ranges"] = fixture_joint_plan
+        fixture_summary["actual_joint_ranges"] = fixture_joint_actual
+        metadata["fixture"] = fixture_summary
+        if fixture_summary["contact_detected"]:
+            print(f"[fixture] CONTACT detected: max={fixture_summary['max_force_N']:.3f} N, "
+                  f"first={fixture_summary['first_contact_time_s']:.3f} s "
+                  f"on {fixture_summary['first_contact_body']}", flush=True)
+        else:
+            print(f"[fixture] no contact above {args_cli.fixture_contact_threshold} N "
+                  f"(max={fixture_summary['max_force_N']:.3f} N)", flush=True)
     rejected = actual_report is not None and not actual_report["passed"]
+    fixture_rejected = bool(fixture_summary and fixture_summary["contact_detected"]
+                            and args_cli.fixture_reject_on_contact)
+    fixture_joint_rejected = bool(fixture_joint_actual and not fixture_joint_actual["passed"])
+    rejected = rejected or fixture_rejected or fixture_joint_rejected
+    rejection_reasons = []
+    if actual_report is not None and not actual_report["passed"]:
+        rejection_reasons.append("leg/ground clearance")
+    if fixture_rejected:
+        rejection_reasons.append("fixture contact")
+    if fixture_joint_rejected:
+        rejection_reasons.append("fixture joint range (actual)")
     # close the simulator
     env.close()
 
@@ -364,7 +531,12 @@ def main():
     sleep(1)  # wait a bit for everything to settle
 
     (data_dir).mkdir(parents=True, exist_ok=True)
-    output = Path(args_cli.output) if args_cli.output else data_dir / recording_name(args_cli.group, mode)
+    default_name = recording_name(args_cli.group, mode)
+    if split_motion is not None:
+        default_name = Path(default_name).stem + "_" + args_cli.leg_sweep + ".pt"
+    if wrist_diagnostic:
+        default_name = Path(default_name).stem + "_wrist26.pt"
+    output = Path(args_cli.output) if args_cli.output else data_dir / default_name
     if not output.is_absolute():
         output = project_root() / "data" / output
     output.parent.mkdir(parents=True, exist_ok=True)
@@ -376,13 +548,30 @@ def main():
         old_plan = output.with_suffix(".trajectory.json")
         if old_plan.exists():
             old_plan.rename(archived.with_suffix(".trajectory.json"))
+        for suffix in (".fixture_contact.csv", ".fixture_contact.png"):
+            sidecar = output.with_suffix(suffix)
+            if sidecar.exists():
+                sidecar.rename(archived.with_suffix(suffix))
+        if wrist_diagnostic:
+            for suffix in (".torque.csv", ".torque_summary.csv", ".position.png", ".torque.png", ".velocity.png"):
+                sidecar = output.with_suffix(suffix)
+                if sidecar.exists():
+                    sidecar.rename(archived.with_suffix(suffix))
         print(f"[archive] {archived}", flush=True)
     plan = {"joint_order": list(joint_order), "center_rad": center.tolist(),
             "signed_amplitude_rad": amplitude.tolist(), "profile": args_cli.trajectory_profile,
             "planned_clearance": planned_report, "actual_clearance": actual_report,
-            "limitations": "Sampled URDF visual/collision box envelopes; cross-leg/ground/leg-limits only, not continuous or whole-body certification."}
+            "fixture": fixture_summary,
+            "limitations": "Sampled URDF visual/collision box envelopes; cross-leg/ground/leg-limits only, not continuous or whole-body certification. Fixture contact is reported by the simulator, not certified against the real stand."}
     output.with_suffix(".trajectory.json").write_text(json.dumps(plan, indent=2))
+    torque_data = {}
+    if wrist_diagnostic:
+        torque_data = {"pd_requested": pd_requested.cpu(), "pd_computed": pd_computed.cpu(),
+                       "applied_torque_step": applied_step.cpu()}
     torch.save({
+        **torque_data,
+        **({"fixture_contact_force_norm": contact_force_norm.cpu()}
+           if contact_force_norm is not None else {}),
         "time": time_data.cpu(),
         "dof_pos": dof_pos_buffer.cpu(),
         "des_dof_pos": dof_target_pos_buffer.cpu(),
@@ -407,10 +596,21 @@ def main():
         "excited": [joint_order[i] for i in selected],
         "experiment": metadata,
     }, output)
+    if contact_force_norm is not None:
+        contact_csv = output.with_suffix(".fixture_contact.csv")
+        write_contact_csv(contact_csv, time_data.cpu().numpy(),
+                          contact_force_norm.cpu().numpy(), contact_sensor.body_names)
+        print(f"[fixture] contact curve saved: {contact_csv}", flush=True)
     print(f"[saved] {output}", flush=True)
+    if wrist_diagnostic:
+        # Preserve the raw recording even if invalid dynamics prevent a limit summary.
+        save_torque_report(output, t, joint_order, pd_requested, pd_computed, applied_step,
+                           metadata["kp"], metadata["kd"], metadata["effort_limit"],
+                           wrist_diagnostic["urdf_effort_limit"])
     if not args_cli.plot:
         if rejected:
-            raise SystemExit("Actual motion failed clearance checks; diagnostic saved as .rejected.pt, do not fit it.")
+            raise SystemExit("Recording rejected (" + ", ".join(rejection_reasons) +
+                             "); saved as .rejected.pt, do not fit it.")
         return
 
     import matplotlib.pyplot as plt
@@ -425,7 +625,7 @@ def main():
     viscous = damping[0].cpu()  # (n_joints,)
     coulomb = friction[0].cpu()  # (n_joints,)
     vel_cpu = dof_vel_buffer.cpu()  # (num_steps, n_joints)
-    torque_cpu = dof_torque_buffer.cpu()  # (num_steps, n_joints)
+    torque_cpu = applied_step.cpu() if wrist_diagnostic else dof_torque_buffer.cpu()
     friction_torque = viscous.unsqueeze(0) * vel_cpu + coulomb.unsqueeze(0) * torch.sign(vel_cpu)
     net_torque = torque_cpu - friction_torque
 
@@ -458,6 +658,12 @@ def main():
         ax = axes2_flat[i]
         ax.plot(t.cpu().numpy(), torque_cpu[:, i].numpy(), label="applied_torque", linewidth=0.8)
         ax.plot(t.cpu().numpy(), net_torque[:, i].numpy(), label="net_torque", linewidth=0.8, linestyle='dashed')
+        if wrist_diagnostic:
+            ax.plot(t.cpu().numpy(), pd_requested[:, i].cpu().numpy(), label="PD requested (SDK formula)", linewidth=.8)
+            ax.plot(t.cpu().numpy(), pd_computed[:, i].cpu().numpy(), label="PD computed (actuator)", linewidth=.8, linestyle=":")
+            limit = float(wrist_diagnostic["urdf_effort_limit"][i])
+            ax.axhline(limit, color="red", linestyle="--", linewidth=.6, label="URDF limit reference")
+            ax.axhline(-limit, color="red", linestyle="--", linewidth=.6)
         ax.set_title(joint_order[i], fontsize=9)
         ax.set_xlabel("Time [s]", fontsize=8)
         ax.set_ylabel("Torque [Nm]", fontsize=8)
@@ -469,6 +675,8 @@ def main():
         axes2_flat[i].set_visible(False)
 
     fig2.suptitle("S800 Chirp — Applied Torque vs Net Torque (after friction)", fontsize=12)
+    if wrist_diagnostic:
+        fig2.suptitle("S800 26 DoF — PD request / computed / applied torque; URDF reference limits", fontsize=12)
     plt.tight_layout()
 
     # ── Figure 3: joint velocity ──
@@ -490,9 +698,27 @@ def main():
 
     fig3.suptitle("S800 Chirp — Joint Velocity", fontsize=12)
     plt.tight_layout()
+    if contact_force_norm is not None:
+        fig4, ax4 = plt.subplots(figsize=(10, 4))
+        peak_force = contact_force_norm.max(dim=1).values.cpu().numpy()
+        ax4.plot(t.cpu().numpy(), peak_force, color="tab:red", linewidth=.9,
+                 label="max over robot bodies")
+        ax4.axhline(args_cli.fixture_contact_threshold, color="black", linestyle="--",
+                    linewidth=.7, label="contact threshold")
+        ax4.set_xlabel("Time [s]")
+        ax4.set_ylabel("Contact force norm [N]")
+        ax4.set_title("S800 fixture contact force")
+        ax4.grid(True)
+        ax4.legend(fontsize=8)
+        fig4.tight_layout()
+        fig4.savefig(output.with_suffix(".fixture_contact.png"), dpi=160)
+    if wrist_diagnostic:
+        for figure, suffix in ((fig, ".position.png"), (fig2, ".torque.png"), (fig3, ".velocity.png")):
+            figure.savefig(output.with_suffix(suffix), dpi=160)
     plt.show()
     if rejected:
-        raise SystemExit("Actual motion failed clearance checks; diagnostic saved as .rejected.pt, do not fit it.")
+        raise SystemExit("Recording rejected (" + ", ".join(rejection_reasons) +
+                         "); saved as .rejected.pt, do not fit it.")
 
 if __name__ == "__main__":
     # run the main function

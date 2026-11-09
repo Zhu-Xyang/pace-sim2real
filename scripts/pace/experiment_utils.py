@@ -1,6 +1,30 @@
 """Shared grouping and recording checks; importable without starting Isaac Sim."""
 
+import math
+
 import torch
+
+
+def expand_fit_bounds(bounds, selected, factor):
+    """Expand selected continuous parameters; leave frozen joints and delay intact."""
+    if not math.isfinite(factor) or factor < 1:
+        raise ValueError("bounds_scale must be finite and >= 1")
+    n = (bounds.shape[0] - 1) // 4
+    if bounds.shape != (4 * n + 1, 2) or not selected or any(i < 0 or i >= n for i in selected):
+        raise ValueError("Invalid bounds shape or selected joints")
+    result = bounds.clone()
+    for block in range(4):
+        idx = torch.tensor([block * n + i for i in selected], device=bounds.device)
+        if block < 3:
+            # Positive parameters: allow smaller armature and larger inertia/friction.
+            result[idx, 0] = bounds[idx, 0] / factor
+            result[idx, 1] = bounds[idx, 1] * factor
+        else:
+            center = bounds[idx].mean(dim=1)
+            radius = (bounds[idx, 1] - bounds[idx, 0]) * factor / 2
+            result[idx, 0] = center - radius
+            result[idx, 1] = center + radius
+    return result
 
 
 def build_joint_groups(joint_order):
@@ -108,9 +132,14 @@ def actuator_metadata(env, cfg, joint_ids, delay_mode):
     }
 
 
-def validate_recording(data, joint_order, selected, current):
+def validate_recording(data, joint_order, selected, current, *, allow_fixture_contact=False):
     if (data.get("experiment", {}).get("actual_clearance") or {}).get("passed") is False:
         raise ValueError("Recording failed leg clearance checks; redesign and recollect before fitting")
+    # fit 环境不建支架；接触过支架的数据没有对应接触力模型，默认拒收。
+    fixture = data.get("experiment", {}).get("fixture") or {}
+    if fixture.get("contact_detected") and not allow_fixture_contact:
+        raise ValueError("Recording contacted the fixture; fit does not model it. "
+                         "Redesign/recollect, or pass --allow_fixture_contact to inspect anyway.")
     if data.get("joint_names", joint_order) != list(joint_order):
         raise ValueError("Recording joint order differs from environment")
     for key in ("dof_pos", "des_dof_pos"):
