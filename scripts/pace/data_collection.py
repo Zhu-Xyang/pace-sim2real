@@ -42,9 +42,14 @@ parser.add_argument("--trajectory_profile", choices=("scaled_legacy", "clearance
 parser.add_argument("--scale_factor", type=float, default=None,
                     help="仅 scaled_legacy 使用：本组原 scale 的乘数 (0,1]；legs/all 默认 0.8，上身组默认 1。")
 parser.add_argument("--clearance_margin", type=float, default=0.02, help="腿间和离地最小保守间隙 [m]。")
+parser.add_argument("--replay_recording", type=Path, help="完整导出PT：逐点回放目标、记录PD和初始实测状态，不加载拟合参数。")
 parser.add_argument("--trajectory_plan", type=Path, default=None, help="读取之前保存的 trajectory.json 中的中心和幅值，仍须通过检查。")
-parser.add_argument("--leg_sweep", choices=("all", "hips", "knee_ankle"), default="all",
+parser.add_argument("--leg_sweep", choices=("all", "hips", "knee_ankle", "hip_pitch", "hip_roll", "hip_yaw", "knee_pitch", "ankle_pitch", "ankle_roll"), default="all",
                     help="legs 分两次采集：hips 仅扫髋；knee_ankle 抬髋保持、按历史幅值扫膝踝。")
+parser.add_argument("--hip_hold_kp", type=float, nargs=3, metavar=("PITCH", "ROLL", "YAW"),
+                    help="仅 knee_pitch 扫频：双侧 hip 保持 Kp；不传则沿用配置。")
+parser.add_argument("--hip_hold_kd", type=float, nargs=3, metavar=("PITCH", "ROLL", "YAW"),
+                    help="仅 knee_pitch 扫频：双侧 hip 保持 Kd；不传则沿用配置。")
 parser.add_argument("--hip_pitch_hold", type=float, default=-0.8,
                     help="knee_ankle 模式髋 pitch 保持角 rad，负值向前抬腿；默认 -.8 是待验证候选。")
 # ── 支架障碍物（真机夹具）───────────────────────────────────────────────
@@ -123,6 +128,26 @@ def main():
     if args_cli.leg_sweep != "all" and (args_cli.group != "legs" or
             args_cli.trajectory_profile != "legacy" or args_cli.trajectory_plan or args_cli.scale_factor is not None):
         raise ValueError("leg_sweep requires --group legs --trajectory_profile legacy, without trajectory_plan/scale_factor")
+    replay = None
+    if args_cli.replay_recording:
+        if args_cli.wrist_diagnostic or args_cli.trajectory_plan or args_cli.hip_hold_kp or args_cli.hip_hold_kd:
+            raise ValueError("Replay cannot combine with wrist/trajectory/gain overrides")
+        replay = torch.load(args_cli.replay_recording, map_location="cpu", weights_only=True)
+        if replay.get("quality", {}).get("partial_diagnostic"):
+            raise ValueError("This replay preview requires a complete recording")
+        if replay["joint_names"] != env_cfg.sim2real.joint_order:
+            raise ValueError("Replay joint order mismatch")
+        rec = replay["experiment"]
+        if rec.get("leg_sweep") != args_cli.leg_sweep:
+            raise ValueError("Replay group mismatch")
+        for key in ("duration", "rest", "ramp"):
+            setattr(args_cli, key, rec[key])
+        env_cfg.sim.dt = rec["physics_dt"]
+        env_cfg.decimation = rec["decimation"]
+        for attr, key in (("stiffness", "kp"), ("damping", "kd")):
+            setattr(env_cfg.scene.robot.actuators["joints"], attr,
+                    {n: float(rec[key][i]) for i,n in enumerate(replay["joint_names"])})
+        print(f"[replay] recorded targets, PD and initial state from {args_cli.replay_recording}")
     wrist_diagnostic = None
     if args_cli.wrist_diagnostic:
         if args_cli.trajectory_profile == "clearance":
@@ -131,6 +156,12 @@ def main():
         wrist_diagnostic = configure(env_cfg, args_cli.wrist_kp, args_cli.wrist_kd)
         print(f"[wrist] 26 DoF; held at zero; Kp={args_cli.wrist_kp}, Kd={args_cli.wrist_kd}")
         print(f"[wrist] {wrist_diagnostic['limitations']}")
+    from hip_hold_gains import apply_hip_hold_gains
+    apply_hip_hold_gains(env_cfg.scene.robot.actuators["joints"],
+                         env_cfg.sim2real.joint_order, args_cli.leg_sweep,
+                         args_cli.hip_hold_kp, args_cli.hip_hold_kd)
+    if args_cli.hip_hold_kp is not None or args_cli.hip_hold_kd is not None:
+        print(f"[hip_hold] pitch/roll/yaw Kp={args_cli.hip_hold_kp}, Kd={args_cli.hip_hold_kd}; None=configuration")
     mode = args_cli.delay_mode or ("command" if args_cli.group != "all" else "torque")
     configure_delay(env_cfg, mode)
     if args_cli.self_collisions is not None:
@@ -384,6 +415,15 @@ def main():
         center[wrist_indices] = 0.
         amplitude[wrist_indices] = 0.
     commands = center.to(wave.device) + wave * amplitude.to(wave.device)
+    if replay is not None:
+        if replay["des_dof_pos"].shape != commands.shape:
+            raise ValueError("Replay duration/target shape mismatch")
+        expected = torch.arange(len(t), dtype=torch.float64) * env_cfg.sim.dt * env_cfg.decimation
+        if not torch.allclose(replay["time"].double(), expected, atol=2e-6, rtol=0):
+            raise ValueError("Replay timestamps are not the expected uniform grid")
+        commands = replay["des_dof_pos"].to(commands.device)
+        center = replay["experiment"]["center_rad"].clone()
+        amplitude = replay["experiment"]["signed_amplitude_rad"].clone()
     fixture_joint_plan = None
     if fixture_spec is not None and args_cli.fixture_joint_check:
         fixture_joint_plan = fixture_joint_limit_violation(
@@ -418,7 +458,7 @@ def main():
                     fixture_joint_ranges=fixture_joint_plan, scale_factor=scale_factor)
     if split_motion is not None:
         metadata["leg_sweep"] = args_cli.leg_sweep
-        metadata["hip_pitch_hold"] = args_cli.hip_pitch_hold if args_cli.leg_sweep == "knee_ankle" else None
+        metadata["hip_pitch_hold"] = args_cli.hip_pitch_hold if args_cli.leg_sweep in ("knee_ankle", "knee_pitch", "ankle_pitch", "ankle_roll") else None
     if wrist_diagnostic:
         metadata["wrist_diagnostic"] = wrist_diagnostic
         metadata["torque_sample_semantics"] = (
@@ -428,8 +468,11 @@ def main():
             "for this row's transition; decimation=1. In torque-delay mode computed/applied "
             "refer to different queued commands. Not measured contact/reaction torque.")
 
-    articulation.write_joint_position_to_sim(commands[0].unsqueeze(0) + bias, joint_ids=joint_ids)
-    articulation.write_joint_velocity_to_sim(torch.zeros_like(bias), joint_ids=joint_ids)
+    if replay is not None:
+        metadata["replay_recording"] = str(args_cli.replay_recording.resolve())
+    initial_q = commands[0] if replay is None else replay["dof_pos"][0].to(commands.device)
+    articulation.write_joint_position_to_sim(initial_q.unsqueeze(0) + bias, joint_ids=joint_ids)
+    articulation.write_joint_velocity_to_sim(torch.zeros_like(bias) if replay is None else replay["dof_vel"][0].to(bias.device).unsqueeze(0), joint_ids=joint_ids)
 
     counter = 0
     # simulate environment

@@ -46,14 +46,16 @@ def split_leg_motion(joint_names, mode, hip_pitch_hold=-0.8):
 
     Hip lift is a static initial/hold pose, not an automatically validated entry path.
     """
-    if mode not in ("hips", "knee_ankle"):
+    from experiment_utils import LEG_JOINT_TYPES
+    pair_mode = mode if mode in LEG_JOINT_TYPES else None
+    if mode not in ("hips", "knee_ankle", *LEG_JOINT_TYPES):
         raise ValueError("mode must be hips or knee_ankle")
     if not np.isfinite(hip_pitch_hold) or hip_pitch_hold >= 0:
         raise ValueError("hip_pitch_hold must be finite and negative (forward lift)")
     # 单位 rad；centers 是摆动中心，amplitudes 是带方向的幅值。
     # 以下填写左侧参数，右侧 roll/yaw 在循环中自动镜像。
     # amplitude=0 表示 PD 保持该中心位置，不是机械锁定。
-    if mode == "hips":
+    if mode == "hips" or (pair_mode and pair_mode.startswith("hip_")):
         # 髋部扫频：保持向前、向外；当前 yaw 幅值为 0.15。
         centers = {"HIP_PITCH": -.55, "HIP_ROLL": .24, "HIP_YAW": 0.,
                    "KNEE_PITCH": .10, "ANKLE_PITCH": .10, "ANKLE_ROLL": 0.,
@@ -80,6 +82,46 @@ def split_leg_motion(joint_names, mode, hip_pitch_hold=-0.8):
                       "WRIST_PITCH": 0., "WRIST_ROLL": 0., "TORSO_YAW": 0.}
         excited = {"KNEE_PITCH", "ANKLE_PITCH", "ANKLE_ROLL"}
 
+    if pair_mode:
+        # Six deployment groups: each type excites its left/right pair only.
+        excited = {pair_mode.upper()}
+        if pair_mode == "hip_pitch":
+            # Original unscaled October amplitude: 0.5 rad, centered at zero.
+            # Fold knees to lift feet; PD hold is not a mechanical lock.
+            # This pose and the actual response still need fixture collision review.
+            centers.update(HIP_PITCH=0., HIP_ROLL=.16, HIP_YAW=0.,
+                           KNEE_PITCH=1.60, ANKLE_PITCH=0., ANKLE_ROLL=0.)
+            amplitudes["HIP_PITCH"] = .50
+        elif pair_mode == "hip_roll":
+            # Offset legs outward and forward for fixture clearance; retain the
+            # original 0.30 rad oscillation around the new roll center.
+            # Left roll target spans [0.10, 0.70]; right is mirrored.
+            # Candidate pose: actual clearance must still be checked in simulation.
+            centers.update(HIP_PITCH=-.45, HIP_ROLL=.40, HIP_YAW=0.,
+                           KNEE_PITCH=0., ANKLE_PITCH=0., ANKLE_ROLL=-.009135)
+            amplitudes["HIP_ROLL"] = .30
+        elif pair_mode == "hip_yaw":
+            # Reduced yaw amplitude after real velocity-limit abort; forward/outward
+            # hip holds. Check actual fixture clearance.
+            centers.update(HIP_PITCH=-.30, HIP_ROLL=.40, HIP_YAW=0.,
+                           KNEE_PITCH=0., ANKLE_PITCH=0., ANKLE_ROLL=-.009135)
+            amplitudes["HIP_YAW"] = .35
+        elif pair_mode == "knee_pitch":
+            # Original unscaled knee center/amplitude: [0.023, 1.023] rad.
+            # Lift thigh forward and outward; ankles hold neutral targets.
+            # Candidate clearance pose, not a validated entry trajectory.
+            centers.update(HIP_PITCH=hip_pitch_hold, HIP_ROLL=.40, HIP_YAW=0.,
+                           KNEE_PITCH=.523, ANKLE_PITCH=0., ANKLE_ROLL=0.)
+            amplitudes["KNEE_PITCH"] = .50
+        elif pair_mode in ("ankle_pitch", "ankle_roll"):
+            # Straight-knee ankle preview with forward/outward thigh holds.
+            # Restore original unscaled October ankle amplitudes and centers.
+            centers.update(HIP_PITCH=hip_pitch_hold, HIP_ROLL=.40, HIP_YAW=0.,
+                           KNEE_PITCH=0., ANKLE_PITCH=0., ANKLE_ROLL=-.009135)
+            amplitudes.update(ANKLE_PITCH=.272, ANKLE_ROLL=.105)
+        amplitudes = {kind: value if kind in excited else 0.
+                      for kind, value in amplitudes.items()}
+
     mirrored = {"HIP_ROLL", "HIP_YAW", "ANKLE_ROLL", "SHOULDER_ROLL", "SHOULDER_YAW", "ELBOW_YAW", "WRIST_ROLL"}
     center, amplitude, selected = [], [], []
     for i, name in enumerate(joint_names):
@@ -89,8 +131,8 @@ def split_leg_motion(joint_names, mode, hip_pitch_hold=-0.8):
         amplitude.append(sign * amplitudes[kind])
         if kind in excited:
             selected.append(i)
-    if len(selected) != 6:
-        raise ValueError("Split leg sweep expects six selected joints across both legs")
+    if len(selected) != (2 if pair_mode else 6):
+        raise ValueError("Unexpected selected joint count for split leg sweep")
     return torch.tensor(center), torch.tensor(amplitude), selected
 
 

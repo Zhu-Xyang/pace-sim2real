@@ -83,11 +83,14 @@ S800_ACTUATOR_CFG = PaceDCMotorCfg(
     #    实测无预警地起振，振荡频率 12.5Hz ≈ 预测的增益穿越频率 12.3Hz。
     #    这 5 个的 kp 下调到 PM=30°（其余 9 类保留 kpkd 原值）。
     #    注：这两条约束同向 —— 降 kp 同时把极点拉回 chirp 带内。
+    # 2026-11-09: SHOULDER_YAW 恢复 kpkd_params.py 的 90/0.4，待新实验验证。
+    # ELBOW_YAW 按用户指定改为 20/0.3，待验证；旧回路延迟实验曾记录起振。
+    # 以下肩 yaw 的 kd 使用部署参考值，不使用下文历史阻尼比推导值。
     stiffness={
         ".*HIP_PITCH.*": 240.0, ".*HIP_ROLL.*": 200.0, ".*HIP_YAW.*": 35.11,
         ".*KNEE_PITCH.*": 240.0, ".*ANKLE_PITCH.*": 90.0, ".*ANKLE_ROLL.*": 17.16,
-        ".*SHOULDER_PITCH.*": 90.0, ".*SHOULDER_ROLL.*": 90.0, ".*SHOULDER_YAW.*": 17.89,
-        ".*ELBOW_PITCH.*": 90.0, ".*ELBOW_YAW.*": 3.99,
+        ".*SHOULDER_PITCH.*": 90.0, ".*SHOULDER_ROLL.*": 90.0, ".*SHOULDER_YAW.*": 90.0,
+        ".*ELBOW_PITCH.*": 90.0, ".*ELBOW_YAW.*": 20.0,
     },
 
     # kd = 2ζ·sqrt(kp·I_total) − d，取 ζ = 0.40，kp 用上面调整后的值。
@@ -120,8 +123,8 @@ S800_ACTUATOR_CFG = PaceDCMotorCfg(
     damping={
         ".*HIP_PITCH.*": 22.8458, ".*HIP_ROLL.*": 22.565, ".*HIP_YAW.*": 0.3885,
         ".*KNEE_PITCH.*": 16.9833, ".*ANKLE_PITCH.*": 5.0268, ".*ANKLE_ROLL.*": 0.175,
-        ".*SHOULDER_PITCH.*": 4.3986, ".*SHOULDER_ROLL.*": 5.943, ".*SHOULDER_YAW.*": 0.2107,
-        ".*ELBOW_PITCH.*": 4.3986, ".*ELBOW_YAW.*": 0.0621,
+        ".*SHOULDER_PITCH.*": 4.3986, ".*SHOULDER_ROLL.*": 5.943, ".*SHOULDER_YAW.*": 0.4,
+        ".*ELBOW_PITCH.*": 4.3986, ".*ELBOW_YAW.*": 0.3,
     },
 
     encoder_bias={".*": 0.0},  # encoder bias in radians

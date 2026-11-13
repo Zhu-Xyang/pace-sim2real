@@ -430,3 +430,38 @@ python -u scripts/pace/data_collection.py --headless --group arms --delay_mode c
 - `fit.py` 默认拒绝 `experiment.fixture.contact_detected=True` 的数据，因为 fit 环境没有支架接触模型。只用于看残差时可加 `--allow_fixture_contact`，但不能当作有效辨识结果。
 
 **限制**：支架是刚体静态碰撞几何，不模拟夹具柔性、悬吊摆动或夹具滑动；接触力是 PhysX 求解结果，不是真机标定值；当前 URDF 的踝-滚转网格在零位只到 base origin 下方约 1.014 m，比实测鞋底高约 0.08 m，因此仿真地面间隙偏保守，脚底离地 3 cm 的实测值不能直接由 URDF 网格复现；记录的是机器人连杆的净接触力，不区分碰到支架的哪一块（需要时把支架拆成多个 JSON 分批运行）。这个功能用于筛选轨迹和定位碰撞时刻，不能替代真机间隙检查。要建准确的支架，需要提供：底座长宽厚、立柱截面和高度、横梁位置尺寸，以及立柱顶端/横梁相对 pelvis 的前后、左右、高度距离。
+
+## 2026-11-10：六类腿部双侧分组与屈膝 hip_pitch
+
+`data_collection.py` 与 `fit.py` 的 `--leg_sweep` 新增：
+`hip_pitch`、`hip_roll`、`hip_yaw`、`knee_pitch`、`ankle_pitch`、`ankle_roll`。
+每组只激励/拟合左右同类型两个关节；旧 `hips` / `knee_ankle` 保留。
+对应 SDK 的 `--joint-type HIP_PITCH` 等六组，不是单侧 `--joint`。
+真机导出脚本 `export_real_split_leg.py` 可读取部署记录中的 `joint_type` 并转换成这些分组。
+fit 使用录制目标，不重新生成当前轨迹。
+
+新增 hip_pitch 仿真方案：中心 0 rad、幅值 +0.5 rad（October 历史原始 scale，非乘 0.8 后的 0.4），膝盖 PD 保持 +1.6 rad（原 1.2 rad 观察到脚卡支架后加大），hip_roll 保持左右 ±0.16 rad，手臂外张。
+屈膝目标和实际运动仍需支架碰撞检查；固定目标不等于机械锁定，初始化不是经过验证的真机入场路径。
+其余五类采用已有 hips / knee_ankle 的中心和相应轴幅值，将未选择关节幅值置零。
+本次未修改 SDK YAML，新增屈膝轨迹尚未同步部署。
+
+```bash
+python -u scripts/pace/data_collection.py \
+  --group legs --leg_sweep hip_pitch --trajectory_profile legacy \
+  --fixture --self_collisions --no-fixture_joint_check --delay_mode command --delay_steps 0 \
+  --duration 20 --min_frequency 0.1 --max_frequency 4 --rest 1 --ramp 2 \
+  --plot --output s800_sim/chirp_hip_pitch_folded.pt
+```
+
+采集通过检查后：
+
+```bash
+python -u scripts/pace/fit.py --headless \
+  --group legs --leg_sweep hip_pitch --num_envs 256 \
+  --data s800_sim/chirp_hip_pitch_folded.pt \
+  --freeze_unfitted_gt --delay_mode command --fix_delay 0 \
+  --max_iterations 1000 --save_interval 10 --epsilon 0 \
+  --log_dir logs/pace/s800_sim_hip_pitch_folded
+```
+
+若采集输出 `.rejected.pt`，先检查接触及关节范围诊断；以上 fit 命令有意不绕过接触拒绝。

@@ -67,6 +67,25 @@ def recording_name(group, delay_mode):
     return "chirp_data.pt" if group == "all" else f"chirp_{group.replace(',', '_')}_{delay_mode}.pt"
 
 
+LEG_JOINT_TYPES = ("hip_pitch", "hip_roll", "hip_yaw", "knee_pitch", "ankle_pitch", "ankle_roll")
+
+
+def select_leg_sweep(joint_order, mode):
+    """Select a bilateral joint pair or a legacy six-joint leg group."""
+    kinds = {"hips": ("HIP_PITCH", "HIP_ROLL", "HIP_YAW"),
+             "knee_ankle": ("KNEE_PITCH", "ANKLE_PITCH", "ANKLE_ROLL"),
+             "all": tuple(k.upper() for k in LEG_JOINT_TYPES)}
+    kinds.update({k: (k.upper(),) for k in LEG_JOINT_TYPES})
+    if mode not in kinds:
+        raise ValueError(f"Unknown leg sweep: {mode}")
+    selected = [i for i, name in enumerate(joint_order)
+                if name.endswith(("_L", "_R")) and name[4:-2] in kinds[mode]]
+    expected = {f"{kind}_{side}" for kind in kinds[mode] for side in ("L", "R")}
+    if len(selected) != len(expected) or {joint_order[i][4:] for i in selected} != expected:
+        raise ValueError("Leg sweep requires exactly one left/right joint per selected type")
+    return selected
+
+
 def configure_delay(env_cfg, mode):
     from pace_sim2real.utils.pace_actuator import PaceDCMotor, PaceDCMotorCmdDelay
     for actuator in env_cfg.scene.robot.actuators.values():

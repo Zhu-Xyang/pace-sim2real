@@ -13,12 +13,56 @@ import numpy as np
 
 from experiment_utils import (build_joint_groups, select_groups, group_chirp,
                               freeze_unfitted_truth, validate_recording, recording_name,
-                              expand_fit_bounds)
+                              expand_fit_bounds, select_leg_sweep)
 
 ROOT = Path(__file__).resolve().parents[2]
 
 
 class ExperimentTests(unittest.TestCase):
+    def test_split_leg_optimizer_only_changes_six_joints(self):
+        import json
+        names = json.loads((ROOT / 'scripts/pace/trajectory_plans/s800_legs_sim_20261012_22dof.json').read_text())['joint_order']
+        groups = build_joint_groups(names)
+        legs = groups.pop('legs')
+        groups.update({g: select_leg_sweep(names, g) for g in ('hips', 'knee_ankle')})
+        self.assertEqual(groups['hips'], [0, 1, 2, 6, 7, 8])
+        self.assertEqual(groups['knee_ankle'], [3, 4, 5, 9, 10, 11])
+        self.assertEqual(sorted(groups['hips'] + groups['knee_ankle']), legs)
+        spec = importlib.util.spec_from_file_location('split_optimizer_test', ROOT / 'source/pace_sim2real/pace_sim2real/optim/cma_es.py')
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        from experiment_utils import LEG_JOINT_TYPES
+        groups.update({g: select_leg_sweep(names, g) for g in LEG_JOINT_TYPES})
+        for group in ('hips', 'knee_ankle', *LEG_JOINT_TYPES):
+            with tempfile.TemporaryDirectory() as directory:
+                bounds = torch.tensor([[0., 1.]] * 88 + [[0., 10.]])
+                data = dict(dof_pos=torch.zeros(2, 22), des_dof_pos=torch.zeros(2, 22), time=torch.arange(2))
+                opt = module.CMAESOptimizer(bounds, 4, directory, names, 1, data, 'cpu',
+                                           groups=groups, active_groups=[group], loss_joints=groups[group],
+                                           opt_delay=True, segment_edges_hz=())
+                expected = sorted([b*22+i for b in range(4) for i in groups[group]] + [88])
+                self.assertEqual(opt.active_idx.tolist(), expected)
+                frozen = [i for i in range(89) if i not in expected]
+                torch.testing.assert_close(opt.sim_params[:, frozen], torch.full((4, len(frozen)), .5))
+                opt.close()
+
+    def test_pair_motion_and_folded_knee(self):
+        import json
+        from s800_motion import split_leg_motion
+        from experiment_utils import LEG_JOINT_TYPES
+        names = json.loads((ROOT / 'scripts/pace/trajectory_plans/s800_legs_sim_20261012_22dof.json').read_text())['joint_order']
+        for mode in LEG_JOINT_TYPES:
+            center, amplitude, selected = split_leg_motion(names, mode)
+            self.assertEqual(selected, select_leg_sweep(names, mode))
+            self.assertEqual(len(selected), 2)
+            self.assertEqual(torch.nonzero(amplitude).flatten().tolist(), selected)
+        center, amplitude, selected = split_leg_motion(names, 'hip_pitch')
+        torch.testing.assert_close(center[selected], torch.zeros(2))
+        torch.testing.assert_close(amplitude[selected], torch.full((2,), .5))
+        knees = select_leg_sweep(names, 'knee_pitch')
+        torch.testing.assert_close(center[knees], torch.full((2,), 1.6))
+        torch.testing.assert_close(amplitude[knees], torch.zeros(2))
+
     def test_expanded_bounds_preserve_frozen_joints_delay_and_original(self):
         # Two joints: fit only the second one. Check complete old domain is retained.
         bounds = torch.tensor([[.05, .5], [.005, .15], [0., 3.], [0., 1.],

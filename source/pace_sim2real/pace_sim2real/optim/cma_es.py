@@ -12,7 +12,7 @@ from datetime import datetime
 import os
 
 class CMAESOptimizer:
-    def __init__(self, bounds, population_size, log_dir, joint_order, max_iteration, data, device, epsilon=None, sigma=0.5, save_interval=10, save_optimization_process=False, segment_edges_hz=(0.1, 4.0), sweep_kind="linear", groups=None, active_groups=None, warm_start=None, opt_delay=True, loss_joints=None, seed=0):
+    def __init__(self, bounds, population_size, log_dir, joint_order, max_iteration, data, device, epsilon=None, sigma=0.5, save_interval=10, save_optimization_process=False, segment_edges_hz=(0.1, 4.0), sweep_kind="linear", groups=None, active_groups=None, warm_start=None, opt_delay=True, loss_joints=None, seed=0, fixed_bias=None):
 
         if max_iteration < 1 or population_size < 2:
             raise ValueError("Need max_iteration>=1 and population_size>=2")
@@ -78,6 +78,12 @@ class CMAESOptimizer:
                 raise ValueError(f"未知分组 {sorted(_missing)}，可用: {sorted(self.groups)}")
             _act_joints = sorted({j for g in active_groups for j in self.groups[g]})
         _act = sorted({j + off for j in _act_joints for off in _blocks})
+        if fixed_bias is not None:
+            value = float(fixed_bias)
+            bias_idx = torch.tensor([3*num_joints+j for j in _act_joints], device=device)
+            if not math.isfinite(value) or not ((bounds[bias_idx, 0] <= value) & (value <= bounds[bias_idx, 1])).all():
+                raise ValueError("fixed_bias must be finite and inside selected bias bounds")
+            _act = [k for k in _act if k not in bias_idx.tolist()]
         if opt_delay:
             _act.append(self.delay_idx)          # 延时是全局的，每一轮都放开重新定
         self.active_idx = torch.tensor(_act, dtype=torch.long, device=device)
@@ -106,6 +112,10 @@ class CMAESOptimizer:
             self.z_ref = _z.clamp(-1.0, 1.0)
         else:
             self.z_ref = torch.zeros(bounds.shape[0], device=device)
+
+        if fixed_bias is not None:
+            self.z_ref[bias_idx] = 2.0 * (value - bounds[bias_idx, 0]) / (bounds[bias_idx, 1] - bounds[bias_idx, 0]) - 1.0
+            print(f"[group] selected joint bias fixed at {value:g} rad; excluded from search")
 
         # 只在 active 子空间里建 CMA-ES；初始 mean = warm_start 在这几维上的取值
         # （没有 warm_start 就是 0 = bounds 中点，与分组前的行为一致）。

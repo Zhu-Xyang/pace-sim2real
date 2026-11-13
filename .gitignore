@@ -88,3 +88,4 @@ tests/
 
 # real test report
 **/docs/reports/s800_real/*
+**/docs/reports/*

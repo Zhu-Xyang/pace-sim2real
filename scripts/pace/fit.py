@@ -13,7 +13,7 @@ import sys
 from pathlib import Path
 from experiment_utils import (build_joint_groups, select_groups, recording_name, configure_delay,
                               actuator_metadata, validate_recording, freeze_unfitted_truth,
-                              expand_fit_bounds)
+                              expand_fit_bounds, select_leg_sweep)
 
 from isaaclab.app import AppLauncher
 
@@ -28,8 +28,14 @@ parser.add_argument("--task", type=str, default="Isaac-Pace-S800-v0", help="Name
 parser.add_argument("--data", type=str, help="数据路径；相对路径从 data/ 起算。")
 parser.add_argument("--wrist_hold", action="store_true",
                     help="26 DoF 真机手臂拟合：腕按记录增益保持，拟合/损失仅含10个肩肘关节。")
+parser.add_argument("--leg_sweep", choices=("all", "hips", "knee_ankle", "hip_pitch", "hip_roll", "hip_yaw", "knee_pitch", "ankle_pitch", "ankle_roll"), default="all",
+                    help="配合 --group legs，仅优化所选六个腿部关节。")
+parser.add_argument("--allow_partial_recording", action="store_true",
+                    help="显式允许标记为 partial_diagnostic 的中止记录，仅用于诊断拟合。")
 parser.add_argument("--delay_mode", choices=("command", "torque"), default=None,
                     help="默认跟随录制元数据；分组新实验默认 command。")
+parser.add_argument("--preserve_unfitted_prior", action="store_true", help="容纳未拟合关节的 warm_start 值，避免被搜索边界截断。")
+parser.add_argument("--fix_bias", type=float, default=None, help="固定所选拟合关节的编码器 bias（rad），从优化维度中移除。")
 parser.add_argument("--fix_delay", type=int, default=None, help="固定整数延时，不参与搜索。")
 parser.add_argument("--freeze_unfitted_gt", action="store_true",
                     help="仅 sim-to-sim：未拟合组用记录真值冻结；本组仍从先验或 warm start 搜索。")
@@ -98,6 +104,13 @@ def main():
     if args_cli.max_iterations is not None and args_cli.max_iterations < 1:
         raise ValueError("max_iterations must be positive")
     active_groups, selected = select_groups(args_cli.group, env_cfg.sim2real.joint_order)
+    if args_cli.leg_sweep != "all":
+        if args_cli.group != "legs" or args_cli.wrist_hold:
+            raise ValueError("leg_sweep requires --group legs without --wrist_hold")
+        if not args_cli.data:
+            raise ValueError("Split leg fit requires an explicit --data path")
+        selected = select_leg_sweep(env_cfg.sim2real.joint_order, args_cli.leg_sweep)
+        active_groups = [args_cli.leg_sweep]
     group_label = "all" if active_groups is None else "_".join(active_groups)
     default_mode = "command" if active_groups else "torque"
     requested_mode = args_cli.delay_mode or default_mode
@@ -107,6 +120,28 @@ def main():
     if not data_file.is_absolute():
         data_file = project_root() / "data" / data_file
     data = torch.load(data_file, map_location="cpu", weights_only=True)
+    partial = data.get("quality", {}).get("partial_diagnostic", False)
+    if partial:
+        if not args_cli.allow_partial_recording:
+            raise ValueError("Aborted recording: pass --allow_partial_recording for diagnostic fitting")
+        print(f"[diagnostic] PARTIAL recording: {data.get('capture_status')}; "
+              "contact not ruled out; results are not validated hardware parameters", flush=True)
+    if args_cli.leg_sweep != "all":
+        recorded = data.get("experiment", {})
+        recorded_mode = (recorded.get("joint_type") or recorded.get("leg_sweep", "")).lower()
+        if recorded_mode != args_cli.leg_sweep:
+            raise ValueError("Requested leg_sweep differs from recording metadata")
+        if recorded.get("runtime_simulation") is False:
+            if args_cli.freeze_unfitted_gt or args_cli.floor_test:
+                raise ValueError("Real split-leg data has no ground truth")
+        if data["joint_names"] != env_cfg.sim2real.joint_order:
+            raise ValueError("Split-leg recording joint order differs from model")
+        # Replay the actual experiment controller, not today's config defaults.
+        for attr, key in (("stiffness", "kp"), ("damping", "kd")):
+            setattr(env_cfg.scene.robot.actuators["joints"], attr,
+                    {n: float(recorded[key][i]) for i, n in enumerate(data["joint_names"])})
+        env_cfg.sim.dt = recorded["physics_dt"]
+        env_cfg.decimation = recorded["decimation"]
     if args_cli.wrist_hold:
         if args_cli.group != "arms" or args_cli.floor_test or args_cli.freeze_unfitted_gt:
             raise ValueError("wrist_hold requires real-data --group arms, without GT options")
@@ -215,6 +250,11 @@ def main():
 
     # ── 分组优化：解析要优化的组 + 载入 warm start ────────────────────────
     groups = build_joint_groups(joint_order)
+    if args_cli.leg_sweep != "all":
+        groups.pop("legs")
+        modes = (("hips", "knee_ankle") if args_cli.leg_sweep in ("hips", "knee_ankle") else
+                 ("hip_pitch", "hip_roll", "hip_yaw", "knee_pitch", "ankle_pitch", "ankle_roll"))
+        groups.update({g: select_leg_sweep(joint_order, g) for g in modes})
     if args_cli.wrist_hold:
         groups["wrists"] = [i for i, n in enumerate(joint_order) if "WRIST" in n]
         groups["arms"] = selected
@@ -225,7 +265,7 @@ def main():
     if active_groups and not args_cli.freeze_unfitted_gt and not args_cli.floor_test:
         # J12_TORSO_YAW 锁定后 arms 已是挂在固定基座上的独立支链，不再被 torso 拖动；
         # 但腿仍通过基座与全身质量耦合，未拟合组的参数错了照样会传到本组。
-        print("[group] 未拟合参数来自 warm_start 或 bounds 中点；腿与上半身仍通过基座耦合。")
+        print("[group] 未拟合参数来自 warm_start 或 bounds 中点；同一支链内未拟合关节仍参与动力学。")
 
     # Keep the physical initial mean comparable when widening the search domain.
     warm_start = original_bounds.mean(dim=1).cpu() if args_cli.bounds_scale != 1 else None
@@ -255,6 +295,22 @@ def main():
         warm_start = freeze_unfitted_truth(bounds_params, data, joint_order, selected, warm_start)
         print("[diagnostic] 非本组参数冻结为注入真值；这是条件参数恢复实验，不代表真机未知全参数辨识。")
 
+    if args_cli.preserve_unfitted_prior:
+        if not args_cli.warm_start or args_cli.freeze_unfitted_gt or args_cli.floor_test:
+            raise ValueError("preserve_unfitted_prior requires warm_start without GT/floor overrides")
+        if warm_start.numel() != bounds_params.shape[0] or not torch.isfinite(warm_start).all():
+            raise ValueError("Invalid warm_start parameter vector")
+        # Frozen priors are not search variables: include them without clipping.
+        n = len(joint_order)
+        for block in range(4):
+            for i in range(n):
+                if i not in selected:
+                    k = block*n+i
+                    value = float(warm_start[k])
+                    bounds_params[k, 0] = min(float(bounds_params[k, 0]), value)
+                    bounds_params[k, 1] = max(float(bounds_params[k, 1]), value)
+        print("[group] 未拟合参数边界已容纳 warm_start 先验；拟合维边界不变。")
+
     if args_cli.fix_delay is not None:
         delay = args_cli.fix_delay
         if not bounds_params[-1, 0] <= delay <= bounds_params[-1, 1]:
@@ -269,10 +325,12 @@ def main():
     # Rest/taper and heterogeneous chirps cannot use the old time-to-frequency labels.
     segment_edges = () if "experiment" in data else env_cfg.sim2real.cmaes.segment_edges_hz
     data["fit"] = {"groups": active_groups, "fitted_joints": selected,
+                   "leg_sweep": args_cli.leg_sweep, "partial_diagnostic": partial,
                    "wrist_hold": args_cli.wrist_hold,
                    "freeze_unfitted_gt": args_cli.freeze_unfitted_gt, "floor_test": args_cli.floor_test,
                    "data_file": str(data_file), "delay_mode": mode, "seed": args_cli.seed,
-                   "fix_delay": args_cli.fix_delay, "warm_start": args_cli.warm_start,
+                   "fix_bias": args_cli.fix_bias, "fix_delay": args_cli.fix_delay, "warm_start": args_cli.warm_start,
+                   "preserve_unfitted_prior": args_cli.preserve_unfitted_prior,
                    "bounds_scale": args_cli.bounds_scale,
                    "original_bounds": original_bounds.cpu(),
                    "sigma": env_cfg.sim2real.cmaes.sigma if args_cli.sigma is None else args_cli.sigma,
@@ -284,6 +342,7 @@ def main():
         active_groups=active_groups,
         warm_start=warm_start,
         opt_delay=args_cli.opt_delay,
+        fixed_bias=args_cli.fix_bias,
         loss_joints=selected,
         seed=args_cli.seed,
         population_size=env.unwrapped.num_envs,
