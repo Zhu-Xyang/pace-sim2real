@@ -151,7 +151,8 @@ def actuator_metadata(env, cfg, joint_ids, delay_mode):
     }
 
 
-def validate_recording(data, joint_order, selected, current, *, allow_fixture_contact=False):
+def validate_recording(data, joint_order, selected, current, *, allow_fixture_contact=False,
+                       allow_real_delay_override=False):
     if (data.get("experiment", {}).get("actual_clearance") or {}).get("passed") is False:
         raise ValueError("Recording failed leg clearance checks; redesign and recollect before fitting")
     # fit 环境不建支架；接触过支架的数据没有对应接触力模型，默认拒收。
@@ -173,6 +174,10 @@ def validate_recording(data, joint_order, selected, current, *, allow_fixture_co
     recorded = data.get("experiment", {})
     for key in ("delay_mode", "physics_dt", "decimation", "self_collisions", "asset"):
         if key in recorded and recorded[key] != current[key]:
+            if (key == "delay_mode" and allow_real_delay_override
+                    and recorded.get("runtime_simulation") is False and "gt" not in data):
+                print(f"[experiment] Real recording delay model override: {recorded[key]} -> {current[key]}; source metadata unchanged")
+                continue
             raise ValueError(f"Recording/environment mismatch: {key}")
     for key in ("kp", "kd", "effort_limit", "velocity_limit"):
         if key in recorded and not torch.allclose(recorded[key].cpu(), current[key].cpu()):

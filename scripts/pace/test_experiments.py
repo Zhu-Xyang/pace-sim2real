@@ -323,6 +323,27 @@ class ExperimentTests(unittest.TestCase):
         self.assertEqual(result[-1], 5.)
         torch.testing.assert_close(result[[0, 2]], torch.tensor([.2, .4]))
 
+    def test_real_delay_override_keeps_other_checks(self):
+        names = ['joint']
+        current = dict(physics_dt=.005, decimation=1, delay_mode='torque', kp=torch.ones(1))
+        recorded = dict(current, delay_mode='command', runtime_simulation=False)
+        data = dict(time=torch.arange(4)*.005, joint_names=names, dof_pos=torch.zeros(4,1),
+                    des_dof_pos=torch.zeros(4,1), excited=names, experiment=recorded)
+        with self.assertRaisesRegex(ValueError, 'delay_mode'):
+            validate_recording(data, names, [0], current)
+        validate_recording(data, names, [0], current, allow_real_delay_override=True)
+        self.assertEqual(recorded['delay_mode'], 'command')
+        with self.assertRaisesRegex(ValueError, 'kp'):
+            validate_recording(data, names, [0], dict(current, kp=torch.zeros(1)), allow_real_delay_override=True)
+        for flag in (True, None):
+            recorded['runtime_simulation'] = flag
+            with self.assertRaisesRegex(ValueError, 'delay_mode'):
+                validate_recording(data, names, [0], current, allow_real_delay_override=True)
+        recorded['runtime_simulation'] = False
+        data['gt'] = {}
+        with self.assertRaisesRegex(ValueError, 'delay_mode'):
+            validate_recording(data, names, [0], current, allow_real_delay_override=True)
+
     def test_replay_rejects_wrong_timing_gain_mode_and_excitation(self):
         names = ["HIP_PITCH", "TORSO_YAW"]
         current = dict(physics_dt=.0025, decimation=1, delay_mode="command", kp=torch.ones(2))

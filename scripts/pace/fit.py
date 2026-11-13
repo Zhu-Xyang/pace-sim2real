@@ -35,6 +35,7 @@ parser.add_argument("--allow_partial_recording", action="store_true",
 parser.add_argument("--delay_mode", choices=("command", "torque"), default=None,
                     help="默认跟随录制元数据；分组新实验默认 command。")
 parser.add_argument("--preserve_unfitted_prior", action="store_true", help="容纳未拟合关节的 warm_start 值，避免被搜索边界截断。")
+parser.add_argument("--evaluate_params", type=Path, help="仅重放给定完整物理参数一次，不运行优化。")
 parser.add_argument("--fix_bias", type=float, default=None, help="固定所选拟合关节的编码器 bias（rad），从优化维度中移除。")
 parser.add_argument("--fix_delay", type=int, default=None, help="固定整数延时，不参与搜索。")
 parser.add_argument("--freeze_unfitted_gt", action="store_true",
@@ -214,6 +215,7 @@ def main():
     log_dir = args_cli.log_dir or project_root() / "logs" / "pace" / log_name
     validate_recording(data, joint_order, selected,
                        actuator_metadata(env, env_cfg, sim_joint_ids, mode),
+                       allow_real_delay_override=args_cli.delay_mode is not None,
                        allow_fixture_contact=args_cli.allow_fixture_contact)
     print(f"[experiment] {data_file}, group={group_label}, delay={mode}, loss joints={len(selected)}")
     time_data = data["time"].to(env.unwrapped.device)
@@ -360,6 +362,13 @@ def main():
         sweep_kind=env_cfg.sim2real.cmaes.sweep_kind,
     )
 
+    if args_cli.evaluate_params:
+        evaluation_params = torch.load(args_cli.evaluate_params, map_location=env.unwrapped.device, weights_only=True).flatten()
+        if evaluation_params.numel() != bounds_params.shape[0] or not torch.isfinite(evaluation_params).all():
+            raise ValueError("Invalid evaluation parameter vector")
+        opt.sim_params[:] = evaluation_params.unsqueeze(0)
+        print(f"[evaluation] Exact parameter replay: {args_cli.evaluate_params}; no optimization")
+
     env.reset()
     opt.update_simulator(articulation, sim_joint_ids, initial_dof_pos)
 
@@ -380,6 +389,14 @@ def main():
             if counter >= time_steps:
                 print("[INFO]: Reached the end of the trajectory, exiting.")
                 counter = 0
+                if args_cli.evaluate_params:
+                    evaluation_dir = Path(opt.writer.log_dir)
+                    torch.save(evaluation_params.cpu(), evaluation_dir / "evaluated_params.pt")
+                    torch.save(opt.sim_dof_pos_buffer[0].cpu(), evaluation_dir / "evaluated_trajectory.pt")
+                    residual = opt.sim_dof_pos_buffer[0] - measured_dof_pos - evaluation_params[3*len(joint_order):4*len(joint_order)]
+                    evaluation_score = residual[:, selected].square().sum(dim=1).mean().item()
+                    print(f"[evaluation] score={evaluation_score:.12g}; results={evaluation_dir}")
+                    break
                 opt.evolve()
                 if opt.finished():
                     break
